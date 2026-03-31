@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code — Deep Technical Analysis</title>
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Claude Code — Deep Technical Analysis">
+<meta property="og:description" content="File-by-file analysis of Claude Code's core engine, security pipelines, retry logic, and architecture trade-offs. With honest critique and scorecard.">
+<meta property="og:image" content="og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Claude Code — Deep Technical Analysis">
+<meta name="twitter:description" content="QueryEngine, agentic loop, BashTool security, API retry, compaction — with trade-off analysis and verdict scorecard.">
+<meta name="twitter:image" content="og-image.png">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#09090b;--bg2:#111114;--bg3:#18181b;--bg4:#27272a;
+  --text:#fafafa;--text2:#a1a1aa;--text3:#71717a;
+  --accent:#8b5cf6;--accent2:#a78bfa;--accent3:#6d28d9;
+  --green:#22c55e;--green2:#4ade80;
+  --blue:#3b82f6;--blue2:#60a5fa;
+  --orange:#f97316;--orange2:#fb923c;
+  --red:#ef4444;--pink:#ec4899;--cyan:#06b6d4;--yellow:#eab308;
+  --radius:12px;--radius-sm:8px;
+  --font-mono:'SF Mono','Cascadia Code','Fira Code',monospace;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --transition:0.3s cubic-bezier(0.4,0,0.2,1);
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);line-height:1.7;overflow-x:hidden}
+a{color:var(--accent2);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Scroll progress */
+.scroll-progress{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--blue),var(--green));z-index:1000;width:0%}
+
+/* Nav */
+nav{position:fixed;top:0;left:0;right:0;z-index:999;backdrop-filter:blur(20px);background:rgba(9,9,11,0.85);border-bottom:1px solid var(--bg4);transition:transform var(--transition)}
+nav.hidden{transform:translateY(-100%)}
+.nav-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 2rem}
+.nav-logo{font-family:var(--font-mono);font-weight:700;font-size:0.9rem;color:var(--accent2);display:flex;align-items:center;gap:8px}
+.nav-logo .dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s ease infinite}
+.nav-links{display:flex;gap:4px;flex-wrap:wrap}
+.nav-links a{padding:6px 12px;border-radius:var(--radius-sm);font-size:0.75rem;color:var(--text2);transition:all var(--transition);font-family:var(--font-mono)}
+.nav-links a:hover,.nav-links a.active{background:var(--bg3);color:var(--text);text-decoration:none}
+
+/* Main layout */
+.container{max-width:1200px;margin:0 auto;padding:0 2rem}
+section{padding:5rem 0}
+.section-label{font-family:var(--font-mono);font-size:0.7rem;text-transform:uppercase;letter-spacing:3px;color:var(--accent);margin-bottom:0.75rem}
+.section-title{font-size:clamp(1.8rem,4vw,2.8rem);font-weight:800;line-height:1.15;margin-bottom:0.75rem}
+.section-desc{font-size:1rem;color:var(--text2);max-width:700px;margin-bottom:2.5rem}
+.divider{height:1px;background:linear-gradient(90deg,transparent,var(--bg4),transparent);margin:0}
+
+/* Cards */
+.card{background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);overflow:hidden;transition:all var(--transition);margin-bottom:1.5rem}
+.card:hover{border-color:rgba(139,92,246,0.3)}
+.card-header{padding:1.25rem 1.5rem;cursor:pointer;display:flex;align-items:center;gap:1rem;user-select:none}
+.card-icon{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
+.card-icon.purple{background:rgba(139,92,246,0.15)}
+.card-icon.blue{background:rgba(59,130,246,0.15)}
+.card-icon.green{background:rgba(34,197,94,0.15)}
+.card-icon.orange{background:rgba(249,115,22,0.15)}
+.card-icon.pink{background:rgba(236,72,153,0.15)}
+.card-icon.cyan{background:rgba(6,182,212,0.15)}
+.card-icon.red{background:rgba(239,68,68,0.15)}
+.card-icon.yellow{background:rgba(234,179,8,0.15)}
+.card-info{flex:1}
+.card-name{font-weight:700;font-size:1rem}
+.card-brief{font-size:0.78rem;color:var(--text3);margin-top:2px}
+.card-meta{font-family:var(--font-mono);font-size:0.7rem;color:var(--text3);display:flex;gap:12px;margin-top:4px}
+.card-meta span{display:flex;align-items:center;gap:4px}
+.card-toggle{width:20px;height:20px;color:var(--text3);transition:transform var(--transition);flex-shrink:0}
+.card.open .card-toggle{transform:rotate(180deg)}
+.card-body{max-height:0;overflow:hidden;transition:max-height 0.6s cubic-bezier(0.4,0,0.2,1)}
+.card.open .card-body{max-height:20000px}
+.card-content{padding:0 1.5rem 1.5rem;border-top:1px solid var(--bg4)}
+.card-content p{color:var(--text2);font-size:0.9rem;margin:1rem 0}
+.card-content h4{color:var(--text);font-size:0.85rem;margin:1.5rem 0 0.5rem;font-family:var(--font-mono);display:flex;align-items:center;gap:8px}
+.card-content h4::before{content:'';width:3px;height:14px;background:var(--accent);border-radius:2px}
+.card-content ul{list-style:none;padding:0}
+.card-content li{padding:5px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.85rem}
+.card-content li::before{content:'';position:absolute;left:0;top:13px;width:5px;height:5px;border-radius:50%;background:var(--bg4)}
+.card-content code{background:var(--bg3);padding:2px 7px;border-radius:4px;font-size:0.78rem;font-family:var(--font-mono);color:var(--accent2)}
+.card-content strong{color:var(--text)}
+
+/* Code blocks */
+.code-block{background:var(--bg);border:1px solid var(--bg4);border-radius:var(--radius-sm);padding:1rem 1.25rem;font-family:var(--font-mono);font-size:0.76rem;line-height:1.8;overflow-x:auto;margin:0.75rem 0;color:var(--text2);white-space:pre;tab-size:2}
+.code-block .kw{color:var(--accent2)}.code-block .fn{color:var(--blue2)}.code-block .str{color:var(--green2)}.code-block .cmt{color:var(--text3)}.code-block .num{color:var(--orange2)}.code-block .type{color:var(--cyan)}
+
+/* Tables */
+.table-wrap{overflow-x:auto;margin:1rem 0}
+table{width:100%;border-collapse:collapse;font-size:0.82rem}
+th{text-align:left;padding:10px 14px;background:var(--bg3);color:var(--text);font-weight:600;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--bg4)}
+td{padding:10px 14px;border-bottom:1px solid var(--bg4);color:var(--text2);vertical-align:top}
+tr:hover td{background:rgba(139,92,246,0.03)}
+
+/* Score badges */
+.score{display:inline-flex;align-items:center;justify-content:center;width:32px;height:24px;border-radius:6px;font-weight:800;font-size:0.7rem;font-family:var(--font-mono)}
+.score.a{background:rgba(34,197,94,0.15);color:var(--green2)}
+.score.b{background:rgba(59,130,246,0.15);color:var(--blue2)}
+.score.c{background:rgba(234,179,8,0.15);color:var(--yellow)}
+.score.d{background:rgba(239,68,68,0.15);color:var(--red)}
+
+/* Pros/Cons */
+.pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:1rem 0}
+.pros,.cons{padding:1rem 1.25rem;border-radius:var(--radius-sm);font-size:0.82rem}
+.pros{background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.15)}
+.cons{background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.15)}
+.pros h5{color:var(--green2);margin-bottom:0.5rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:1px}
+.cons h5{color:var(--red);margin-bottom:0.5rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:1px}
+.pros li::before{background:var(--green)!important}.cons li::before{background:var(--red)!important}
+
+/* Mini flow */
+.mini-flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0.75rem 0}
+.mini-flow-step{padding:5px 10px;border-radius:6px;font-size:0.72rem;font-family:var(--font-mono);background:var(--bg3);color:var(--text2);white-space:nowrap}
+.mini-flow-arrow{color:var(--text3);font-size:0.7rem}
+
+/* Tabs */
+.tabs{display:flex;gap:4px;margin-bottom:1.5rem;border-bottom:1px solid var(--bg4);padding-bottom:0}
+.tab{padding:10px 18px;font-size:0.82rem;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all var(--transition);font-family:var(--font-mono)}
+.tab:hover{color:var(--text2)}
+.tab.active{color:var(--accent2);border-bottom-color:var(--accent)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* Hero */
+#hero{min-height:60vh;display:flex;flex-direction:column;justify-content:center;padding-top:80px}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--bg4);background:var(--bg2);font-size:0.75rem;color:var(--text2);margin-bottom:1.5rem;font-family:var(--font-mono);width:fit-content}
+.hero-badge .live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease infinite}
+h1.hero-title{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:900;line-height:1.05;margin-bottom:1rem}
+h1.hero-title .gradient{background:linear-gradient(135deg,var(--accent2),var(--blue2),var(--green2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:1.1rem;color:var(--text2);max-width:650px;margin-bottom:2rem}
+.hero-links{display:flex;gap:12px;flex-wrap:wrap}
+.hero-links a{padding:10px 20px;border-radius:var(--radius-sm);font-size:0.85rem;font-family:var(--font-mono);transition:all var(--transition)}
+.hero-links .primary{background:var(--accent);color:white}
+.hero-links .primary:hover{background:var(--accent3);text-decoration:none}
+.hero-links .secondary{border:1px solid var(--bg4);color:var(--text2)}
+.hero-links .secondary:hover{border-color:var(--accent);color:var(--text);text-decoration:none}
+
+/* Animations */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:translateY(0)}}
+.animate{opacity:0;transform:translateY(15px);transition:all 0.5s ease}
+.animate.visible{opacity:1;transform:translateY(0)}
+
+/* Responsive */
+@media(max-width:768px){
+  .container{padding:0 1.25rem}
+  section{padding:3rem 0}
+  .pros-cons{grid-template-columns:1fr}
+  .nav-links{display:none}
+  table{font-size:0.75rem}
+  th,td{padding:8px 10px}
+}
+
+/* Security pipeline diagram */
+.pipeline{display:flex;flex-direction:column;gap:0;margin:1rem 0}
+.pipeline-step{display:flex;align-items:stretch;gap:0}
+.pipeline-num{width:40px;min-width:40px;display:flex;flex-direction:column;align-items:center}
+.pipeline-num .circle{width:28px;height:28px;border-radius:50%;background:var(--bg3);border:2px solid var(--bg4);display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;font-family:var(--font-mono);color:var(--text2);z-index:1}
+.pipeline-num .line{flex:1;width:2px;background:var(--bg4)}
+.pipeline-info{flex:1;padding:4px 0 20px 16px}
+.pipeline-info h5{font-size:0.82rem;font-weight:600;margin-bottom:2px}
+.pipeline-info p{font-size:0.78rem;color:var(--text3)}
+
+/* Callout boxes */
+.callout{padding:1rem 1.25rem;border-radius:var(--radius-sm);margin:1rem 0;font-size:0.85rem;display:flex;gap:10px;align-items:flex-start}
+.callout.warn{background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.2);color:var(--yellow)}
+.callout.info{background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:var(--blue2)}
+.callout.danger{background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);color:var(--red)}
+.callout.success{background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:var(--green2)}
+.callout-icon{font-size:1.1rem;flex-shrink:0;margin-top:1px}
+</style>
+</head>
+<body>
+
+<div class="scroll-progress" id="scrollProgress"></div>
+
+<nav id="nav">
+  <div class="nav-inner">
+    <div class="nav-logo"><span class="dot"></span> claude code deep dive</div>
+    <div class="nav-links">
+      <a href="claude-code-guide.html">Overview</a>
+      <a href="#engine">Engine</a>
+      <a href="#tools-deep">Tools</a>
+      <a href="#services">Services</a>
+      <a href="#state">State</a>
+      <a href="#security">Security</a>
+      <a href="#tradeoffs">Trade-offs</a>
+      <a href="#verdict">Verdict</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ==================== HERO ==================== -->
+<div class="container">
+<section id="hero">
+  <div class="hero-badge"><span class="live"></span> Technical Deep Dive</div>
+  <h1 class="hero-title"><span class="gradient">Under the Hood</span></h1>
+  <p class="hero-sub">A file-by-file analysis of Claude Code's internals — implementation patterns, actual code structure, security pipelines, performance characteristics, and honest critique of what works and what doesn't.</p>
+  <div class="hero-links">
+    <a href="claude-code-guide.html" class="secondary">Back to Overview</a>
+    <a href="claude-code-internals.html" class="secondary" style="border-color:rgba(249,115,22,0.4);color:#fb923c">Internals →</a>
+    <a href="#verdict" class="primary">Skip to Verdict</a>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<!-- ==================== CORE ENGINE ==================== -->
+<div class="container">
+<section id="engine">
+  <div class="section-label">Core Engine</div>
+  <div class="section-title">The Query Engine & Agentic Loop</div>
+  <div class="section-desc">The brain of Claude Code lives in three files: QueryEngine.ts orchestrates sessions, query.ts runs the infinite agentic loop, and Tool.ts defines the tool type system.</div>
+
+  <!-- QueryEngine.ts -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon purple">🧠</div>
+      <div class="card-info">
+        <div class="card-name">QueryEngine.ts — Session Orchestrator</div>
+        <div class="card-brief">Manages multi-turn conversations, token budgets, transcript persistence</div>
+        <div class="card-meta"><span>1,297 lines</span><span>Class-based</span><span>Async generator</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <p>QueryEngine is the <strong>session lifecycle owner</strong>. Each user turn flows through <code>submitMessage()</code>, an async generator that yields SDK messages in real-time.</p>
+
+      <h4>Key Design: Mutable State Container</h4>
+      <div class="code-block"><span class="cmt">// State persists across turns within a session</span>
+<span class="kw">class</span> <span class="type">QueryEngine</span> {
+  <span class="kw">private</span> mutableMessages: Message[]           <span class="cmt">// Full conversation history</span>
+  <span class="kw">private</span> abortController: AbortController      <span class="cmt">// Shared abort signal</span>
+  <span class="kw">private</span> readFileState: FileStateCache          <span class="cmt">// LRU cache of read files</span>
+  <span class="kw">private</span> loadedNestedMemoryPaths: Set&lt;string&gt;  <span class="cmt">// Prevents re-injecting CLAUDE.md</span>
+  <span class="kw">private</span> hasHandledOrphanedPermission: boolean <span class="cmt">// One-time orphan handling</span>
+}</div>
+
+      <h4>Execution Flow</h4>
+      <div class="pipeline">
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">1</div><div class="line"></div></div><div class="pipeline-info"><h5>processUserInput()</h5><p>Parse slash commands, extract model overrides, handle results text</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">2</div><div class="line"></div></div><div class="pipeline-info"><h5>recordTranscript()</h5><p>Persist user turn to disk BEFORE query loop (ensures resume robustness)</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">3</div><div class="line"></div></div><div class="pipeline-info"><h5>buildSystemInitMessage()</h5><p>Yield SDK system_init with git status, CLAUDE.md, tool schemas</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">4</div><div class="line"></div></div><div class="pipeline-info"><h5>query() generator</h5><p>Enter the agentic loop (query.ts) — streams messages back</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">5</div></div><div class="pipeline-info"><h5>accumulateUsage()</h5><p>Merge token counts, track costs, record final transcript</p></div></div>
+      </div>
+
+      <h4>Interesting Implementation Details</h4>
+      <ul>
+        <li><strong>Fire-and-forget transcript in bare mode</strong> — <code>isBareMode()</code> skips awaiting disk write for batch/headless sessions, but interactive mode always awaits for consistency</li>
+        <li><strong>Double permission context construction</strong> — Built once for slash commands, then again after commands may mutate messages/model. Code smell but necessary</li>
+        <li><strong>Nested memory dedup</strong> — <code>loadedNestedMemoryPaths</code> Set persists across turns, preventing re-injection of the same CLAUDE.md file dozens of times in long sessions</li>
+        <li><strong>Orphaned permission handling</strong> — On session resume, pending permission requests from the crashed session are resolved exactly once via <code>hasHandledOrphanedPermission</code> flag</li>
+      </ul>
+
+      <div class="pros-cons">
+        <div class="pros"><h5>Strengths</h5><ul>
+          <li>Robust resume — transcript written before query loop</li>
+          <li>Memory dedup prevents context bloat in long sessions</li>
+          <li>Clean async generator interface for SDK consumers</li>
+        </ul></div>
+        <div class="cons"><h5>Weaknesses</h5><ul>
+          <li>Double context construction is duplicate code (lines 335-395 and 492-527 nearly identical)</li>
+          <li>If process kills mid-query, incomplete turn's transcript lost</li>
+          <li>All subscribers share same mutable message array — potential aliasing bugs</li>
+        </ul></div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- query.ts -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon purple">🔁</div>
+      <div class="card-info">
+        <div class="card-name">query.ts — The Agentic Loop</div>
+        <div class="card-brief">The infinite while-true loop that drives every interaction — think, act, observe, repeat</div>
+        <div class="card-meta"><span>1,730 lines</span><span>Async generator</span><span>7 continue sites</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <p>This is the most complex file in the codebase. The <code>queryLoop()</code> function implements a state-machine-style infinite loop with <strong>7 continue/break sites</strong>, a 5-stage compaction pipeline, streaming tool execution, and 4 recovery paths.</p>
+
+      <h4>Loop Iteration Structure</h4>
+      <div class="code-block"><span class="kw">while</span> (<span class="num">true</span>) {
+  <span class="cmt">// 1. Compaction Pipeline (5 stages, in order)</span>
+  applyToolResultBudget()      <span class="cmt">// Per-message tool result size cap</span>
+  snipCompactIfNeeded()        <span class="cmt">// Feature-gated history rotation</span>
+  microcompact()               <span class="cmt">// Cached message dedup</span>
+  contextCollapse()            <span class="cmt">// Staged collapse commits</span>
+  autocompact()                <span class="cmt">// Full-text summarization</span>
+
+  <span class="cmt">// 2. API Streaming Loop</span>
+  <span class="kw">for await</span> (<span class="kw">const</span> chunk <span class="kw">of</span> callModel(messages, tools)) {
+    collect assistantMessages, toolUseBlocks
+    StreamingToolExecutor.addTool()  <span class="cmt">// Start tools during stream</span>
+    withhold recoverable errors      <span class="cmt">// Don't yield until recovery tried</span>
+  }
+
+  <span class="cmt">// 3. Recovery Paths (checked in order)</span>
+  <span class="kw">if</span> (withheld413) → collapse drain → reactive compact → <span class="kw">continue</span>
+  <span class="kw">if</span> (withheldMedia) → reactive compact → <span class="kw">continue</span>
+  <span class="kw">if</span> (withheldMaxTokens) → escalate 8k→64k → <span class="kw">continue</span>
+  <span class="kw">if</span> (stopHookErrors) → append errors → <span class="kw">continue</span>
+
+  <span class="cmt">// 4. Tool Execution</span>
+  <span class="kw">const</span> results = streamingExecutor.getRemainingResults() ?? runTools()
+  <span class="kw">for await</span> (<span class="kw">const</span> update <span class="kw">of</span> results) <span class="kw">yield</span> update
+
+  <span class="cmt">// 5. Parallel work during tool execution</span>
+  generateToolUseSummary()     <span class="cmt">// Haiku summarization (non-blocking)</span>
+  prefetchAttachments()        <span class="cmt">// Memory/file changes (non-blocking)</span>
+
+  <span class="cmt">// 6. Loop continuation</span>
+  <span class="kw">if</span> (maxTurns reached) <span class="kw">return</span>
+  state = { messages: [...msgs, ...assistantMsgs, ...toolResults] }
+  <span class="kw">continue</span>
+}</div>
+
+      <h4>Two Tool Execution Paths</h4>
+      <ul>
+        <li><strong>StreamingToolExecutor (new)</strong> — Tools start executing while the model is still streaming. Results yielded in real-time. Much faster UX</li>
+        <li><strong>runTools() (fallback)</strong> — Sequential execution, blocks until all tools complete. Used when streaming executor unavailable</li>
+      </ul>
+
+      <h4>Error Recovery: 4 Distinct Strategies</h4>
+      <div class="table-wrap"><table>
+        <tr><th>Error</th><th>Strategy</th><th>Attempt Limit</th></tr>
+        <tr><td>Prompt too long (413)</td><td>1. Collapse drain (cheap) → 2. Reactive compact (expensive summarization)</td><td>1 each, sequential</td></tr>
+        <tr><td>Media size error</td><td>Reactive compact only (strips/downsizes media)</td><td>1 attempt</td></tr>
+        <tr><td>Max output tokens</td><td>1. Escalate 8K→64K (once) → 2. Multi-turn retry with "Resume directly..." injection</td><td>3 total (MAX_OUTPUT_TOKENS_RECOVERY_LIMIT)</td></tr>
+        <tr><td>Model 529 overloaded</td><td>FallbackTriggeredError → switch to fallback model entirely</td><td>3 consecutive 529s</td></tr>
+      </table></div>
+
+      <h4>Streaming Error Withholding</h4>
+      <p>Recoverable errors are <strong>withheld</strong> during streaming — not yielded to the UI. This prevents showing "prompt too long" to the user when the system can auto-recover via compaction. The error is only surfaced if recovery fails.</p>
+
+      <div class="callout info">
+        <span class="callout-icon">i</span>
+        <span><strong>Immutable params + mutable state dict:</strong> The loop params are never reassigned, but a <code>state</code> object is replaced at each continue site. This makes state mutations explicit — always <code>state = { ... }</code> — so they're easy to find in code review.</span>
+      </div>
+
+      <div class="pros-cons">
+        <div class="pros"><h5>Strengths</h5><ul>
+          <li>Sophisticated recovery — handles 4 failure modes automatically</li>
+          <li>Streaming tool executor gives sub-second feedback</li>
+          <li>Error withholding prevents premature user-facing errors</li>
+          <li>Parallel Haiku summarization during tool execution</li>
+        </ul></div>
+        <div class="cons"><h5>Weaknesses</h5><ul>
+          <li>1,730 lines in a single function — very hard to follow all paths</li>
+          <li>7 continue sites make control flow non-linear</li>
+          <li>5-stage compaction pipeline interactions hard to debug</li>
+          <li>No backpressure on streaming — UI becomes unresponsive if tools slow</li>
+        </ul></div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Tool.ts -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon blue">🔧</div>
+      <div class="card-info">
+        <div class="card-name">Tool.ts — The Tool Type System</div>
+        <div class="card-brief">794 lines defining the comprehensive tool interface — 40+ methods per tool</div>
+        <div class="card-meta"><span>794 lines</span><span>~330 lines of interface</span><span>50+ fields on ToolUseContext</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <p>Every tool implements the <code>Tool&lt;Input, Output, Progress&gt;</code> interface — a massive type with ~40 methods covering execution, validation, permissions, UI rendering, observability, and MCP integration.</p>
+
+      <h4>Key Tool Methods</h4>
+      <div class="code-block"><span class="type">Tool</span>&lt;Input, Output, Progress&gt; = {
+  <span class="cmt">// Core</span>
+  <span class="fn">call</span>(input, context, canUseTool, parentMsg, onProgress)
+  <span class="fn">description</span>(input, options)
+
+  <span class="cmt">// Schemas & Validation</span>
+  inputSchema: Input              <span class="cmt">// Zod v4 schema</span>
+  <span class="fn">validateInput</span>?(input, ctx)     <span class="cmt">// Business logic checks</span>
+  <span class="fn">checkPermissions</span>(input, ctx)  <span class="cmt">// Permission gating</span>
+
+  <span class="cmt">// Safety Declarations</span>
+  <span class="fn">isConcurrencySafe</span>(input)     <span class="cmt">// Can run in parallel?</span>
+  <span class="fn">isReadOnly</span>(input)             <span class="cmt">// No side effects?</span>
+  <span class="fn">isDestructive</span>?(input)         <span class="cmt">// Risky operation?</span>
+
+  <span class="cmt">// UI Rendering (7 methods)</span>
+  <span class="fn">renderToolUseMessage</span>()        <span class="cmt">// React/Ink component</span>
+  <span class="fn">renderToolResultMessage</span>()     <span class="cmt">// Result display</span>
+  <span class="fn">renderToolUseProgressMessage</span>() <span class="cmt">// Progress display</span>
+  <span class="cmt">// ... 4 more render methods</span>
+
+  <span class="cmt">// Deferral & Search</span>
+  shouldDefer?: <span class="num">boolean</span>         <span class="cmt">// Lazy-load via ToolSearch</span>
+  searchHint?: <span class="str">string</span>           <span class="cmt">// e.g., "jupyter" for NotebookEdit</span>
+}</div>
+
+      <h4>ToolUseContext — The Kitchen Sink</h4>
+      <p>Every tool receives a <code>ToolUseContext</code> with <strong>50+ optional fields</strong>. This is simultaneously the biggest strength (tools have everything they need) and weakness (massive coupling surface).</p>
+      <div class="code-block"><span class="type">ToolUseContext</span> = {
+  options: { commands, tools, mainLoopModel, mcpClients, ... }
+  abortController: AbortController
+  readFileState: FileStateCache
+  getAppState(): AppState
+  setAppState(f): <span class="kw">void</span>
+
+  <span class="cmt">// UI callbacks</span>
+  handleElicitation?, setToolJSX?, addNotification?, ...
+
+  <span class="cmt">// Session tracking</span>
+  nestedMemoryAttachmentTriggers?, loadedNestedMemoryPaths?, ...
+
+  <span class="cmt">// State management (10+ setters)</span>
+  setInProgressToolUseIDs, setResponseLength, setStreamMode, ...
+
+  <span class="cmt">// Advanced</span>
+  criticalSystemReminder_EXPERIMENTAL?, renderedSystemPrompt?, ...
+}</div>
+
+      <h4>buildTool() — Defaults with Type-level Magic</h4>
+      <p>The <code>buildTool()</code> factory fills in defaults for ~15 methods, making all defaultable fields <strong>required</strong> on the return type via TypeScript conditional types. Callers never see optional methods — type-safe at compile time.</p>
+
+      <div class="callout warn">
+        <span class="callout-icon">!</span>
+        <span><strong>Anti-pattern alert:</strong> ToolUseContext's 50+ fields tempt tools to depend on unrelated internals. There's no enforcement of what tools "should" use — any field addition becomes part of every tool's contract.</span>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- tools.ts Registry -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon blue">📋</div>
+      <div class="card-info">
+        <div class="card-name">tools.ts — Conditional Tool Registry</div>
+        <div class="card-brief">Feature-gated tool loading with prompt-cache-stable sorting</div>
+        <div class="card-meta"><span>396 lines</span><span>8+ feature gates</span><span>Cache-aware sorting</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>Compile-Time Dead Code Elimination</h4>
+      <div class="code-block"><span class="cmt">// bun:bundle feature() enables tree-shaking</span>
+<span class="kw">const</span> cronTools = <span class="fn">feature</span>(<span class="str">'AGENT_TRIGGERS'</span>)
+  ? [require(<span class="str">'./tools/ScheduleCronTool/CronCreateTool.js'</span>).CronCreateTool]
+  : []
+
+<span class="cmt">// Ant-only tools (internal Anthropic users)</span>
+<span class="kw">const</span> REPLTool = process.env.USER_TYPE === <span class="str">'ant'</span>
+  ? require(<span class="str">'./tools/REPLTool/REPLTool.js'</span>).REPLTool
+  : <span class="num">null</span></div>
+
+      <h4>Prompt Cache Stability</h4>
+      <p>Tools are <strong>sorted alphabetically</strong> before being sent to the API. This ensures the system prompt's tool definitions form a stable prefix for prompt caching. Without sorting, adding/removing an MCP tool would invalidate the cache for ALL tools.</p>
+      <div class="code-block"><span class="cmt">// assembleToolPool() — cache-aware merge</span>
+<span class="kw">const</span> byName = (a, b) => a.name.localeCompare(b.name)
+<span class="kw">return</span> uniqBy(
+  [...builtInTools].sort(byName)  <span class="cmt">// Built-ins first (stable prefix)</span>
+    .concat(mcpTools.sort(byName)) <span class="cmt">// MCP tools after (dynamic suffix)</span>
+  , <span class="str">'name'</span>                         <span class="cmt">// Built-in wins on name collision</span>
+)</div>
+
+      <h4>Lazy Require for Circular Dependencies</h4>
+      <p><code>getTeamCreateTool()</code>, <code>getSendMessageTool()</code> etc. are functions that return tools lazily — preventing module init deadlocks where <code>tools.ts → SomeAgentTool → tools.ts</code>.</p>
+
+      <div class="callout warn">
+        <span class="callout-icon">!</span>
+        <span><strong>Bug:</strong> <code>getPowerShellTool()</code> is called twice on line 248 — once for the truthiness check and once for the array spread. Should cache the result.</span>
+      </div>
+    </div></div>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<!-- ==================== TOOLS DEEP DIVE ==================== -->
+<div class="container">
+<section id="tools-deep">
+  <div class="section-label">Tool Implementations</div>
+  <div class="section-title">Security & Execution Details</div>
+  <div class="section-desc">How the most critical tools work internally — from BashTool's 160K-line security stack to FileEditTool's staleness detection.</div>
+
+  <!-- BashTool -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon red">💻</div>
+      <div class="card-info">
+        <div class="card-name">BashTool — Shell Execution with Industrial Security</div>
+        <div class="card-brief">The most complex tool — multi-layered security pipeline with 23 distinct checks</div>
+        <div class="card-meta"><span>160K+ lines total</span><span>23 security check IDs</span><span>Tree-sitter AST</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>Security Validation Pipeline (23 Checks)</h4>
+      <div class="pipeline">
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">1</div><div class="line"></div></div><div class="pipeline-info"><h5>Input Schema Validation</h5><p>Zod validates: command (required string), timeout (0-600K ms), description, run_in_background, dangerouslyDisableSandbox</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">2</div><div class="line"></div></div><div class="pipeline-info"><h5>Pre-Parse Validation</h5><p>Check for incomplete commands, malformed syntax, dangerous operators before any parsing</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">3</div><div class="line"></div></div><div class="pipeline-info"><h5>Quote Extraction</h5><p>Produces 3 variants: withDoubleQuotes, fullyUnquoted, unquotedKeepQuoteChars — tracks escape sequences</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">4</div><div class="line"></div></div><div class="pipeline-info"><h5>Tree-sitter AST Analysis</h5><p>Optional semantic parsing for accurate command classification. Falls back to regex if unavailable</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">5</div><div class="line"></div></div><div class="pipeline-info"><h5>20+ Sequential Validators</h5><p>JQ system() → obfuscated flags → shell metacharacters → dangerous variables → newline injection → heredoc safety → etc.</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">6</div></div><div class="pipeline-info"><h5>Permission Decision</h5><p>Result: allow (auto-execute) | deny (block silently) | ask (prompt user)</p></div></div>
+      </div>
+
+      <h4>Heredoc Validation — Preventing Nested Injection</h4>
+      <p>Line-based matching (not regex <code>[\\s\\S]*?</code>) prevents nested injection. Only allows quoted delimiters (<code>'EOF'</code>) where the body is literal text, not executable.</p>
+      <div class="code-block"><span class="cmt">// SAFE: Body is literal text (quoted delimiter)</span>
+git commit -m <span class="str">"$(cat &lt;&lt;'EOF'
+This is a commit message.
+No command injection possible here.
+EOF
+)"</span>
+
+<span class="cmt">// BLOCKED: Unquoted delimiter allows expansion</span>
+<span class="kw">cat</span> &lt;&lt;EOF
+$(rm -rf /)  <span class="cmt">← would execute!</span>
+EOF</div>
+
+      <h4>Environment Variable Whitelist</h4>
+      <p>Only non-execution-modifying variables are permitted: build flags (<code>GOEXPERIMENT</code>, <code>CGO_ENABLED</code>), logging (<code>RUST_LOG</code>), display (<code>NO_COLOR</code>, <code>TZ</code>). Variables like <code>IFS</code>, <code>LD_PRELOAD</code>, <code>PATH</code> are blocked.</p>
+
+      <h4>Zsh-Specific Protections</h4>
+      <p>Blocks module builtins that could bypass security: <code>zmodload</code>, <code>sysopen</code>, <code>sysread</code>, <code>syswrite</code>, <code>zpty</code>, <code>ztcp</code>, <code>zsocket</code>. Defense-in-depth even though they require <code>zmodload</code> first.</p>
+    </div></div>
+  </div>
+
+  <!-- FileEditTool -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon blue">✏️</div>
+      <div class="card-info">
+        <div class="card-name">FileEditTool — Surgical Edits with Staleness Detection</div>
+        <div class="card-brief">Atomic read-modify-write with double-check pattern and quote normalization</div>
+        <div class="card-meta"><span>10 error codes</span><span>Double staleness check</span><span>LSP integration</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>Staleness Detection — Why Double-Check?</h4>
+      <p>FileEditTool checks file freshness at <strong>two points</strong>: during <code>validateInput()</code> and again just before writing in <code>call()</code>. This prevents race conditions where a linter, watcher, or user modifies the file between permission check and actual write.</p>
+
+      <div class="code-block"><span class="cmt">// Check 1: validateInput() — before permission prompt</span>
+<span class="kw">const</span> readTimestamp = toolUseContext.readFileState.get(fullFilePath)
+<span class="kw">if</span> (!readTimestamp || readTimestamp.isPartialView) {
+  <span class="kw">return</span> { result: <span class="num">false</span>, behavior: <span class="str">'ask'</span> }
+}
+<span class="kw">if</span> (lastWriteTime > readTimestamp.timestamp) {
+  <span class="cmt">// Content fallback for Windows timestamp quirks</span>
+  <span class="kw">if</span> (isFullRead && fileContent === readTimestamp.content) { <span class="cmt">/* OK */</span> }
+  <span class="kw">else</span> <span class="kw">return</span> { result: <span class="num">false</span>, message: <span class="str">'File has been modified'</span> }
+}
+
+<span class="cmt">// Check 2: call() — just before fs.writeFile()</span>
+<span class="cmt">// Same logic repeated (race window between Check 1 and Check 2)</span></div>
+
+      <h4>10 Validation Error Codes</h4>
+      <div class="table-wrap"><table>
+        <tr><th>Code</th><th>Check</th><th>Action</th></tr>
+        <tr><td>1</td><td>old_string === new_string</td><td>Reject (no-op edit)</td></tr>
+        <tr><td>2</td><td>Deny rule matches path</td><td>Reject (permission)</td></tr>
+        <tr><td>3</td><td>File > 1 GiB</td><td>Reject (OOM prevention)</td></tr>
+        <tr><td>4</td><td>File not found</td><td>Suggest alternatives</td></tr>
+        <tr><td>5</td><td>Jupyter notebook</td><td>Redirect to NotebookEditTool</td></tr>
+        <tr><td>6</td><td>File never read</td><td>Reject (staleness)</td></tr>
+        <tr><td>7</td><td>Modified since read</td><td>Reject (staleness)</td></tr>
+        <tr><td>8</td><td>String not found</td><td>Reject</td></tr>
+        <tr><td>9</td><td>Multiple matches, replace_all=false</td><td>Reject (ambiguous)</td></tr>
+        <tr><td>10</td><td>Invalid settings content</td><td>Reject</td></tr>
+      </table></div>
+
+      <h4>Post-Write Integration</h4>
+      <p>After writing, FileEditTool notifies the LSP server via <code>didChange</code> + <code>didSave</code> events, triggering diagnostics. Also handles curly-to-straight quote normalization for cross-editor compatibility.</p>
+    </div></div>
+  </div>
+
+  <!-- Tool Orchestration -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon green">🔀</div>
+      <div class="card-info">
+        <div class="card-name">Tool Orchestration — Concurrent Execution with Safety Partitioning</div>
+        <div class="card-brief">Read-only tools run in parallel; writes are serialized to prevent race conditions</div>
+        <div class="card-meta"><span>Max 10 concurrent</span><span>Safety partitioning</span><span>Queued context mods</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>Batch Execution Model</h4>
+      <div class="code-block"><span class="cmt">// Input: [tool_use_1, tool_use_2, tool_use_3, tool_use_4]</span>
+
+<span class="cmt">// Partitioning by isConcurrencySafe():</span>
+tool_use_1: <span class="fn">ls</span>    → Batch 1 (safe)    ← <span class="str">concurrent</span>
+tool_use_2: <span class="fn">grep</span>  → Batch 1 (safe)    ← <span class="str">concurrent</span>
+tool_use_3: <span class="fn">edit</span>  → Batch 2 (unsafe)  ← <span class="kw">sequential</span>
+tool_use_4: <span class="fn">rm</span>    → Batch 3 (unsafe)  ← <span class="kw">sequential</span>
+
+<span class="cmt">// Execution order:</span>
+<span class="cmt">// 1. Batch 1: Both run in parallel (max 10 concurrency pool)</span>
+<span class="cmt">// 2. Batch 2: Waits for Batch 1, then runs alone</span>
+<span class="cmt">// 3. Batch 3: Waits for Batch 2, then runs alone</span></div>
+
+      <h4>Context Modification Queuing</h4>
+      <p>During parallel execution, tools can't modify shared context directly. Instead, modifications are <strong>queued</strong> and applied sequentially after the batch completes. This prevents concurrent context mutations.</p>
+    </div></div>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<!-- ==================== SERVICES ==================== -->
+<div class="container">
+<section id="services">
+  <div class="section-label">Services Layer</div>
+  <div class="section-title">API, MCP, Retry & Compaction</div>
+  <div class="section-desc">The services layer handles external integrations with sophisticated error recovery, prompt caching, and multi-backend support.</div>
+
+  <!-- API -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon purple">🤖</div>
+      <div class="card-info">
+        <div class="card-name">claude.ts — Anthropic API Client</div>
+        <div class="card-brief">Streaming, prompt caching, model fallbacks, beta headers, multi-backend</div>
+        <div class="card-meta"><span>3,420 lines</span><span>5 beta features</span><span>3 backends (API, Bedrock, Vertex)</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>Request Construction Pipeline</h4>
+      <div class="pipeline">
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">1</div><div class="line"></div></div><div class="pipeline-info"><h5>Tool Schema Building</h5><p>toolToAPISchema() for each tool, dynamic deferred tool loading via tool_reference blocks</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">2</div><div class="line"></div></div><div class="pipeline-info"><h5>Message Normalization</h5><p>normalizeMessagesForAPI(), ensureToolResultPairing(), strip excess media (max 100 items)</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">3</div><div class="line"></div></div><div class="pipeline-info"><h5>Prompt Caching</h5><p>getCacheControl() with optional 1h TTL, global cache scope when eligible</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">4</div><div class="line"></div></div><div class="pipeline-info"><h5>Parameter Construction</h5><p>paramsFromContext() captures RetryContext, adaptive thinking config, fast mode speed</p></div></div>
+        <div class="pipeline-step"><div class="pipeline-num"><div class="circle">5</div></div><div class="pipeline-info"><h5>Streaming Execution</h5><p>withRetry() wrapper, withStreamingVCR() for testing, TTFT tracking, automatic non-streaming fallback</p></div></div>
+      </div>
+
+      <h4>Beta Header Management</h4>
+      <p>Beta headers use <strong>sticky-on latches</strong>: once a beta is enabled in a session, it stays enabled. This prevents cache invalidation when beta eligibility changes mid-session.</p>
+
+      <h4>Global Cache Scope</h4>
+      <p>When <code>shouldUseGlobalCacheScope()</code> returns true, prompt caching is shared across all sessions using the same system prompt. This dramatically reduces costs for repeated queries but is disabled when MCP tools are present (per-user dynamic content).</p>
+    </div></div>
+  </div>
+
+  <!-- Retry -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon orange">🔄</div>
+      <div class="card-info">
+        <div class="card-name">withRetry.ts — Multi-Layered Retry Strategy</div>
+        <div class="card-brief">Exponential backoff, subscriber-gated retries, fast mode cooldown, persistent mode</div>
+        <div class="card-meta"><span>823 lines</span><span>6 error type handlers</span><span>Up to 6hr backoff cap</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>Error Classification</h4>
+      <div class="table-wrap"><table>
+        <tr><th>Status</th><th>Type</th><th>Retry?</th><th>Special Handling</th></tr>
+        <tr><td>529</td><td>Overloaded</td><td>3x then fallback</td><td>Switch to fallback model after MAX_529_RETRIES</td></tr>
+        <tr><td>429</td><td>Rate limit</td><td>Varies by subscriber</td><td>Parse Retry-After header, unified rate limit headers</td></tr>
+        <tr><td>408/409</td><td>Timeout/Lock</td><td>Automatic</td><td>Standard exponential backoff</td></tr>
+        <tr><td>401/403</td><td>Auth</td><td>Token refresh</td><td>Clear keychain cache, retry with new token</td></tr>
+        <tr><td>400</td><td>Context overflow</td><td>Adjust max_tokens</td><td>Parse token counts, reduce output budget</td></tr>
+        <tr><td>5xx</td><td>Server error</td><td>Enterprise only</td><td>Non-subscribers see final error</td></tr>
+      </table></div>
+
+      <h4>Backoff Calculation</h4>
+      <div class="code-block">BASE_DELAY_MS = <span class="num">500</span>
+delay = BASE_DELAY * <span class="num">2</span>^attempt    <span class="cmt">// 500ms → 1s → 2s → 4s → ...</span>
+delay = min(delay, MAX_CAP)        <span class="cmt">// Cap at 32s (default) or 5min (persistent)</span>
+delay = delay * (0.75 + random * 0.5) <span class="cmt">// ±25% jitter (thundering herd prevention)</span>
+
+<span class="cmt">// Persistent mode (ant-only, unattended):</span>
+PERSISTENT_RESET_CAP_MS = <span class="num">6</span> * <span class="num">60</span> * <span class="num">60</span> * <span class="num">1000</span> <span class="cmt">// 6 hours max backoff</span>
+HEARTBEAT_INTERVAL_MS = <span class="num">30_000</span>    <span class="cmt">// Keep-alive every 30s during retry</span></div>
+
+      <h4>Fast Mode Fallback</h4>
+      <p>When a fast-mode request hits 429: if retry-after < 20s, wait and preserve prompt cache. If > 20s, trigger cooldown (switch to standard speed permanently). This balances cost (overage) vs latency (cache invalidation).</p>
+    </div></div>
+  </div>
+
+  <!-- Compaction -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon cyan">📐</div>
+      <div class="card-info">
+        <div class="card-name">Compaction System — 5-Stage Context Management</div>
+        <div class="card-brief">Keeps conversations within context window via progressive summarization</div>
+        <div class="card-meta"><span>1,706 lines</span><span>5 stages</span><span>Circuit breaker: 3 failures max</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>5-Stage Pipeline (Applied Each Iteration)</h4>
+      <div class="table-wrap"><table>
+        <tr><th>#</th><th>Stage</th><th>What It Does</th><th>Cost</th></tr>
+        <tr><td>1</td><td>Content Budget</td><td>Caps per-message tool result size</td><td>Free (local)</td></tr>
+        <tr><td>2</td><td>Snip</td><td>Feature-gated history rotation (drop oldest turns)</td><td>Free (local)</td></tr>
+        <tr><td>3</td><td>Microcompact</td><td>Deduplicate cached messages</td><td>Free (local)</td></tr>
+        <tr><td>4</td><td>Context Collapse</td><td>Commit staged collapses (lazy evaluation)</td><td>Free (local)</td></tr>
+        <tr><td>5</td><td>Auto-Compact</td><td>Full-text LLM summarization of history</td><td>Expensive (API call)</td></tr>
+      </table></div>
+
+      <h4>Auto-Compact Threshold</h4>
+      <div class="code-block">effective_window = contextWindowForModel - <span class="num">20_000</span> <span class="cmt">// Reserve for summary output</span>
+threshold = effective_window - <span class="num">13_000</span>           <span class="cmt">// Buffer before hitting limit</span>
+
+<span class="cmt">// Example: 200K context model</span>
+threshold = (<span class="num">200_000</span> - <span class="num">20_000</span>) - <span class="num">13_000</span> = <span class="num">167_000</span> tokens</div>
+
+      <h4>Consecutive Failure Circuit Breaker</h4>
+      <p>After <strong>3 consecutive auto-compact failures</strong>, the system stops retrying to avoid hammering the API. This prevents sessions stuck in context over-limit from wasting API calls indefinitely.</p>
+
+      <h4>Compaction-of-Compaction Recovery</h4>
+      <p>When the compact request <em>itself</em> hits "prompt too long": <code>truncateHeadForPTLRetry()</code> drops the oldest 20% of message groups and prepends <code>[earlier conversation truncated for compaction retry]</code>.</p>
+    </div></div>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<!-- ==================== STATE ==================== -->
+<div class="container">
+<section id="state">
+  <div class="section-label">State & Architecture</div>
+  <div class="section-title">State Management, Permissions & Bridge</div>
+  <div class="section-desc">A dual-layer state architecture: bootstrap STATE (non-React, CLI-early) + AppState (React Context), connected by a minimal 35-line custom store.</div>
+
+  <!-- Store -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon pink">💾</div>
+      <div class="card-info">
+        <div class="card-name">Custom Store — 35 Lines, Zero Dependencies</div>
+        <div class="card-brief">Observer pattern with Object.is comparison, useSyncExternalStore integration</div>
+        <div class="card-meta"><span>35 lines</span><span>No Redux/Zustand</span><span>React 18 integration</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <div class="code-block"><span class="kw">function</span> <span class="fn">createStore</span>&lt;T&gt;(initialState: T, onChange?: OnChange&lt;T&gt;): Store&lt;T&gt; {
+  <span class="kw">let</span> state = initialState
+  <span class="kw">const</span> listeners = <span class="kw">new</span> Set&lt;Listener&gt;()
+
+  <span class="kw">return</span> {
+    <span class="fn">getState</span>: () => state,
+    <span class="fn">setState</span>: (updater) => {
+      <span class="kw">const</span> prev = state
+      <span class="kw">const</span> next = updater(prev)
+      <span class="kw">if</span> (Object.is(next, prev)) <span class="kw">return</span>  <span class="cmt">// Identity check — no change</span>
+      state = next
+      onChange?.({ newState: next, oldState: prev })
+      <span class="kw">for</span> (<span class="kw">const</span> listener <span class="kw">of</span> listeners) listener()
+    },
+    <span class="fn">subscribe</span>: (listener) => {
+      listeners.add(listener)
+      <span class="kw">return</span> () => listeners.delete(listener)
+    },
+  }
+}</div>
+      <p>React integration via <code>useSyncExternalStore</code> — subscribers only re-render when their selected slice changes (Object.is comparison on selector output).</p>
+
+      <div class="pros-cons">
+        <div class="pros"><h5>Strengths</h5><ul>
+          <li>Zero dependencies — no bundle size overhead</li>
+          <li>Full type safety with TypeScript generics</li>
+          <li>Reference stability for React selectors</li>
+          <li>Immutable update pattern prevents accidental mutations</li>
+        </ul></div>
+        <div class="cons"><h5>Weaknesses</h5><ul>
+          <li>All subscribers notified regardless of selector scope</li>
+          <li>No middleware/devtools (time-travel, logging)</li>
+          <li>No built-in state normalization for nested structures</li>
+          <li>Boilerplate-heavy — every change constructs new object</li>
+        </ul></div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Permission System -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon green">🛡️</div>
+      <div class="card-info">
+        <div class="card-name">Permission System — Async Race-Aware Decision Engine</div>
+        <div class="card-brief">ResolveOnce.claim() atomically arbitrates between 4+ concurrent handlers</div>
+        <div class="card-meta"><span>389 lines PermissionContext</span><span>204 lines useCanUseTool</span><span>ResolveOnce pattern</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>Decision Flow</h4>
+      <div class="code-block"><span class="fn">canUseTool</span>(tool, input, context) {
+  <span class="cmt">// 1. Config-based check (instant)</span>
+  <span class="kw">const</span> configResult = <span class="fn">hasPermissionsToUseTool</span>(tool, input)
+  <span class="kw">if</span> (configResult === <span class="str">'ALLOW'</span>) <span class="kw">return</span> allow  <span class="cmt">// Skip all dialogs</span>
+  <span class="kw">if</span> (configResult === <span class="str">'DENY'</span>) <span class="kw">return</span> deny
+
+  <span class="cmt">// 2. Multiple async handlers race:</span>
+  <span class="fn">Promise.race</span>([
+    <span class="fn">handleCoordinatorPermission</span>(),  <span class="cmt">// Plan mode leader approval</span>
+    <span class="fn">handleSwarmWorkerPermission</span>(),  <span class="cmt">// Teammate approval</span>
+    <span class="fn">bashClassifier</span>(<span class="num">3000</span>),           <span class="cmt">// ML classifier (3s timeout)</span>
+    <span class="fn">handleInteractivePermission</span>(),  <span class="cmt">// User UI dialog</span>
+  ])
+
+  <span class="cmt">// ResolveOnce.claim() — only first handler wins</span>
+  <span class="cmt">// Others back off seeing claimed: true</span>
+}</div>
+
+      <h4>ResolveOnce — Preventing Race Conditions</h4>
+      <p>Multiple handlers can be waiting simultaneously. <code>ResolveOnce.claim()</code> atomically checks-and-marks as resolved, so only the first handler to call <code>claim()</code> gets to make the decision.</p>
+
+      <h4>Bash Classifier Integration</h4>
+      <p>Runs <strong>in parallel</strong> with the UI dialog. If it finishes with high confidence before the user clicks, the permission is granted automatically. 3-second timeout prevents UI lock. Speculative check via <code>peekSpeculativeClassifierCheck()</code>.</p>
+    </div></div>
+  </div>
+
+  <!-- Bridge -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon cyan">🔌</div>
+      <div class="card-info">
+        <div class="card-name">Bridge Layer — IDE Integration with Network Resilience</div>
+        <div class="card-brief">Echo-dedup ring buffers, exponential backoff, proactive JWT refresh</div>
+        <div class="card-meta"><span>~1,000 lines main loop</span><span>BoundedUUIDSet</span><span>Sleep detection</span></div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <h4>BoundedUUIDSet — O(1) Echo Dedup</h4>
+      <div class="code-block"><span class="cmt">// Circular ring buffer + Set for O(1) add/has with constant memory</span>
+<span class="kw">class</span> <span class="type">BoundedUUIDSet</span> {
+  <span class="kw">private</span> ring: (string | undefined)[]  <span class="cmt">// Fixed capacity</span>
+  <span class="kw">private</span> set = <span class="kw">new</span> Set&lt;string&gt;()       <span class="cmt">// O(1) lookup</span>
+  <span class="kw">private</span> writeIdx = <span class="num">0</span>                 <span class="cmt">// Next write position</span>
+
+  <span class="fn">add</span>(uuid: string) {
+    <span class="kw">const</span> evicted = <span class="kw">this</span>.ring[<span class="kw">this</span>.writeIdx]
+    <span class="kw">if</span> (evicted) <span class="kw">this</span>.set.delete(evicted)  <span class="cmt">// Evict oldest</span>
+    <span class="kw">this</span>.ring[<span class="kw">this</span>.writeIdx] = uuid
+    <span class="kw">this</span>.set.add(uuid)
+    <span class="kw">this</span>.writeIdx = (<span class="kw">this</span>.writeIdx + <span class="num">1</span>) % <span class="kw">this</span>.capacity
+  }
+}</div>
+      <p>Prevents: 1) Echo messages (our own messages reflected back), 2) Re-deliveries after transport swap.</p>
+
+      <h4>Backoff Strategy</h4>
+      <div class="code-block">connInitialMs:   <span class="num">2_000</span>    <span class="cmt">// Start at 2s</span>
+connCapMs:       <span class="num">120_000</span>  <span class="cmt">// Cap at 2min</span>
+connGiveUpMs:    <span class="num">600_000</span>  <span class="cmt">// Give up after 10min</span>
+
+<span class="cmt">// Sleep detection: if delay > connCapMs × 2, system probably slept</span>
+<span class="cmt">// → reset error budget (laptop close/open scenario)</span></div>
+    </div></div>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<!-- ==================== SECURITY ==================== -->
+<div class="container">
+<section id="security">
+  <div class="section-label">Security Analysis</div>
+  <div class="section-title">Security Architecture — Strengths & Gaps</div>
+  <div class="section-desc">A multi-layered security model with centralized permission gating, but some notable gaps in sandboxing and classifier trust.</div>
+
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon green">🔒</div>
+      <div class="card-info">
+        <div class="card-name">5-Layer Defense Model</div>
+        <div class="card-brief">Input → Syntax → Semantic → Execution → Audit</div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <div class="table-wrap"><table>
+        <tr><th>Layer</th><th>Mechanism</th><th>What It Catches</th></tr>
+        <tr><td><strong>1. Input</strong></td><td>Zod schema validation, semantic parsing</td><td>Type errors, malformed inputs</td></tr>
+        <tr><td><strong>2. Syntax</strong></td><td>Quote tracking, heredoc line-matching, tree-sitter AST</td><td>Injection attacks, obfuscated commands</td></tr>
+        <tr><td><strong>3. Semantic</strong></td><td>Command classification, env whitelist, variable analysis</td><td>Privilege escalation, data exfil</td></tr>
+        <tr><td><strong>4. Execution</strong></td><td>Sandbox constraints, read-only mode, staleness detection</td><td>Race conditions, unintended writes</td></tr>
+        <tr><td><strong>5. Audit</strong></td><td>Telemetry logging, permission tracking, decision reasons</td><td>Post-incident analysis, compliance</td></tr>
+      </table></div>
+
+      <h4>Known Security Gaps</h4>
+      <ul>
+        <li><strong>No rate limiting at CLI level</strong> — relies entirely on API server's rate limits</li>
+        <li><strong>File editing sandbox is weak</strong> — tools can write anywhere within <code>--cwd</code>, no chroot isolation</li>
+        <li><strong>Classifier trust unvalidated</strong> — auto-approval in <code>auto</code> mode based on external ML model, no human review loop</li>
+        <li><strong>API keys in memory</strong> — present during session, no memory clearing on exit (normal for CLI tools, but worth noting)</li>
+        <li><strong>No plugin sandboxing</strong> — plugins execute in-process with full permissions</li>
+      </ul>
+    </div></div>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<!-- ==================== TRADE-OFFS ==================== -->
+<div class="container">
+<section id="tradeoffs">
+  <div class="section-label">Critical Analysis</div>
+  <div class="section-title">Trade-offs, Bottlenecks & Technical Debt</div>
+  <div class="section-desc">An honest assessment of what works well, what doesn't, and where the codebase could improve.</div>
+
+  <!-- Design Trade-offs -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon orange">⚖️</div>
+      <div class="card-info">
+        <div class="card-name">Key Design Trade-offs</div>
+        <div class="card-brief">Every major decision has a cost — here are the biggest ones</div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <div class="table-wrap"><table>
+        <tr><th>Decision</th><th>Benefit</th><th>Cost</th></tr>
+        <tr><td><strong>Custom store (35 lines) vs Redux/Zustand</strong></td><td>Zero dependencies, smaller binary, full control</td><td>No devtools, no middleware ecosystem, boilerplate-heavy</td></tr>
+        <tr><td><strong>Single 1,730-line query loop</strong></td><td>All recovery logic co-located, efficient state transitions</td><td>Extremely hard to follow, test, or modify safely</td></tr>
+        <tr><td><strong>ToolUseContext with 50+ fields</strong></td><td>Tools have everything they need, extensible</td><td>Massive coupling surface, tools can depend on anything</td></tr>
+        <tr><td><strong>Mutable message refs for speculation</strong></td><td>Avoids array spreads per token (performance)</td><td>Breaks React's immutability contract, potential aliasing bugs</td></tr>
+        <tr><td><strong>5-stage compaction pipeline</strong></td><td>Progressive cost: cheap stages first, expensive last</td><td>Complex stage interactions, hard to debug which stage helped</td></tr>
+        <tr><td><strong>Compile-time feature flags</strong></td><td>Dead code elimination, small binaries</td><td>Only works in conditionals, can't change at runtime</td></tr>
+        <tr><td><strong>Prompt-cache-stable tool sorting</strong></td><td>Dramatic cost savings (cache reuse)</td><td>Tool order in system prompt is alphabetical, not logical</td></tr>
+        <tr><td><strong>Streaming tool executor</strong></td><td>Sub-second tool feedback during model streaming</td><td>Dual code paths (streaming + sequential fallback)</td></tr>
+      </table></div>
+    </div></div>
+  </div>
+
+  <!-- Performance Bottlenecks -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon red">🐌</div>
+      <div class="card-info">
+        <div class="card-name">Performance Bottlenecks</div>
+        <div class="card-brief">Where things get slow — and why</div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <div class="table-wrap"><table>
+        <tr><th>Bottleneck</th><th>Impact</th><th>Root Cause</th></tr>
+        <tr><td><strong>Large conversation history</strong></td><td>Sessions slow after 50+ turns</td><td>Token counting scales linearly with history. Snip compaction (if enabled) rewrites file every N turns</td></tr>
+        <tr><td><strong>Permission classifier</strong></td><td>100-500ms added per bash call</td><td>ML inference on every command in <code>auto</code> mode. Network request, no caching</td></tr>
+        <tr><td><strong>Skill loading</strong></td><td>100-500ms startup delay</td><td>File I/O scanning 3 directories + YAML frontmatter parsing. No caching between sessions</td></tr>
+        <tr><td><strong>GrowthBook init</strong></td><td>Up to 5s startup delay</td><td>Remote HTTPS eval with 5s timeout. Falls back to stale disk cache on failure</td></tr>
+        <tr><td><strong>MCP server discovery</strong></td><td>1-3s startup delay</td><td>Tool discovery requests to all MCP servers. Blocked on slowest server</td></tr>
+        <tr><td><strong>No streaming backpressure</strong></td><td>UI unresponsive during slow tools</td><td><code>for await</code> loop on callModel() never yields control until complete</td></tr>
+      </table></div>
+    </div></div>
+  </div>
+
+  <!-- Testing Gaps -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon yellow">🧪</div>
+      <div class="card-info">
+        <div class="card-name">Testing Gaps — The Biggest Risk</div>
+        <div class="card-brief">Critical modules with minimal or no test coverage</div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <div class="callout danger">
+        <span class="callout-icon">!</span>
+        <span><strong>Critical gap:</strong> The most complex modules — QueryEngine (1,297 lines), query.ts (1,730 lines), and the permission system — have minimal or no unit test coverage.</span>
+      </div>
+
+      <h4>Untested Critical Paths</h4>
+      <ul>
+        <li><strong>QueryEngine</strong> — No unit tests for the session lifecycle orchestrator</li>
+        <li><strong>query.ts agentic loop</strong> — No integration tests for tool execution, retry logic, or recovery paths</li>
+        <li><strong>Permission system</strong> — Classifier, rule matching, hook execution all untested</li>
+        <li><strong>State mutations</strong> — <code>onChangeAppState()</code> side effects have no tests</li>
+        <li><strong>Compaction pipeline</strong> — 5-stage interaction behaviors untested</li>
+        <li><strong>No chaos testing</strong> — Network failures, partial API responses, timeouts</li>
+      </ul>
+
+      <h4>What IS Tested</h4>
+      <ul>
+        <li>Web UI: Vitest unit tests, Playwright E2E, visual regression</li>
+        <li>CLI smoke tests (minimal — single integration test)</li>
+        <li>Some tool-specific unit tests</li>
+      </ul>
+    </div></div>
+  </div>
+
+  <!-- Code Organization -->
+  <div class="card" onclick="toggle(this)">
+    <div class="card-header">
+      <div class="card-icon blue">📁</div>
+      <div class="card-info">
+        <div class="card-name">Code Organization — Strengths & Weaknesses</div>
+        <div class="card-brief">Clear high-level structure, but massive utility files and weak module boundaries</div>
+      </div>
+      <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+    </div>
+    <div class="card-body"><div class="card-content">
+      <div class="pros-cons">
+        <div class="pros"><h5>Well-Organized</h5><ul>
+          <li>Clear separation: tools/, commands/, services/, hooks/</li>
+          <li>Consistent naming: {Name}Tool.ts, {name}Command.ts</li>
+          <li>Heavy TypeScript with Zod validation everywhere</li>
+          <li>Official architecture docs (architecture.md, subsystems.md)</li>
+          <li>Config migration system — idempotent, versioned</li>
+          <li>Self-contained bundled skills as reference implementations</li>
+        </ul></div>
+        <div class="cons"><h5>Needs Improvement</h5><ul>
+          <li><strong>Monolithic files:</strong> messages.ts (5,513 lines), hooks.ts (5,023 lines), bashParser.ts (4,437 lines)</li>
+          <li><strong>QueryEngine is one file</strong> — should split into Pipeline + RetryHandler + TokenCounter</li>
+          <li><strong>Service layer too thin</strong> — mostly direct API wrappers, no contracts/interfaces</li>
+          <li><strong>Plugin loader complexity</strong> — 3,303 lines intertwining marketplace, loading, versioning</li>
+          <li><strong>No clear module boundaries</strong> — circular dependencies possible, 89 trivial index.ts files</li>
+          <li><strong>Context drilling</strong> — ToolUseContext's 50+ fields passed through many layers</li>
+        </ul></div>
+      </div>
+    </div></div>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<!-- ==================== VERDICT ==================== -->
+<div class="container">
+<section id="verdict">
+  <div class="section-label">Final Assessment</div>
+  <div class="section-title">The Verdict</div>
+  <div class="section-desc">A scorecard for Claude Code's architecture across 10 dimensions.</div>
+
+  <div class="table-wrap"><table>
+    <tr><th>Aspect</th><th>Score</th><th>Analysis</th></tr>
+    <tr><td><strong>Design Patterns</strong></td><td><span class="score a">A</span></td><td>DI, lazy loading, memoization, event-sourcing, builder pattern — all well-applied and consistent</td></tr>
+    <tr><td><strong>Permission System</strong></td><td><span class="score a">A</span></td><td>Standout feature. Race-aware, pluggable handlers, declarative rules, full audit trail</td></tr>
+    <tr><td><strong>Error Recovery</strong></td><td><span class="score a">A-</span></td><td>4 distinct recovery strategies, error withholding, circuit breakers. Missing: cascading failure protection</td></tr>
+    <tr><td><strong>Security</strong></td><td><span class="score b">B+</span></td><td>23-check bash pipeline, staleness detection, env whitelist. Gaps: no plugin sandboxing, weak file sandbox</td></tr>
+    <tr><td><strong>Extensibility</strong></td><td><span class="score b">B+</span></td><td>Three layers (MCP, skills, plugins) work well. Weak: no plugin isolation, skill versioning</td></tr>
+    <tr><td><strong>State Management</strong></td><td><span class="score b">B</span></td><td>Custom store avoids dependencies. Lacks devtools, middleware, normalization</td></tr>
+    <tr><td><strong>Concurrency</strong></td><td><span class="score b">B</span></td><td>Read-only parallelism, safety partitioning, streaming executor. Manual backpressure</td></tr>
+    <tr><td><strong>Performance</strong></td><td><span class="score b">B-</span></td><td>Conversation history slow at scale, uncached skill loading, classifier latency</td></tr>
+    <tr><td><strong>Code Organization</strong></td><td><span class="score b">B-</span></td><td>Clear high-level structure. Massive utility files, monolithic QueryEngine, weak boundaries</td></tr>
+    <tr><td><strong>Testing</strong></td><td><span class="score c">C</span></td><td>Most complex modules untested. High regression risk. Web UI has decent coverage</td></tr>
+  </table></div>
+
+  <div style="margin-top:2rem">
+    <h4 style="font-family:var(--font-mono);font-size:0.85rem;margin-bottom:1rem;display:flex;align-items:center;gap:8px"><span style="width:3px;height:14px;background:var(--green);border-radius:2px;display:inline-block"></span>What's Exceptional</h4>
+    <ul style="list-style:none;padding:0">
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--green)"></span><strong>The agentic loop's recovery system</strong> — 4 failure modes handled automatically, error withholding prevents premature user-facing errors, streaming tool executor gives real-time feedback</li>
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--green)"></span><strong>Permission system's ResolveOnce pattern</strong> — elegant race condition handling across 4+ async handlers</li>
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--green)"></span><strong>BashTool's security depth</strong> — 23 checks, tree-sitter AST, heredoc line-matching, zsh-specific protections</li>
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--green)"></span><strong>Prompt cache stability via sorted tools</strong> — subtle but saves significant API costs</li>
+    </ul>
+  </div>
+
+  <div style="margin-top:2rem">
+    <h4 style="font-family:var(--font-mono);font-size:0.85rem;margin-bottom:1rem;display:flex;align-items:center;gap:8px"><span style="width:3px;height:14px;background:var(--red);border-radius:2px;display:inline-block"></span>What Needs Work</h4>
+    <ul style="list-style:none;padding:0">
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--red)"></span><strong>Testing coverage</strong> — Most complex modules (QueryEngine, query.ts, permissions) have no unit tests. Highest regression risk</li>
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--red)"></span><strong>query.ts complexity</strong> — 1,730 lines, 7 continue sites, 5-stage compaction pipeline. Should be split into smaller composable units</li>
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--red)"></span><strong>ToolUseContext coupling</strong> — 50+ fields with no enforcement of what tools should access</li>
+      <li style="padding:6px 0;padding-left:1.5rem;position:relative;color:var(--text2);font-size:0.88rem"><span style="position:absolute;left:0;top:14px;width:5px;height:5px;border-radius:50%;background:var(--red)"></span><strong>Plugin sandboxing</strong> — Third-party plugins execute in-process with full permissions</li>
+    </ul>
+  </div>
+
+  <div class="callout success" style="margin-top:2rem">
+    <span class="callout-icon">*</span>
+    <span><strong>Bottom line:</strong> Claude Code is a <strong>well-engineered production system</strong> that demonstrates deep expertise in CLI architecture, streaming systems, and security. The permission system and error recovery are standout features. The main risks are test coverage (low for critical paths) and complexity concentration (query.ts). For a 512K-line codebase, the architecture is remarkably coherent.</span>
+  </div>
+</section>
+</div>
+
+<div class="divider"></div>
+
+<footer style="text-align:center;padding:4rem 2rem;color:var(--text3);font-size:0.85rem">
+  <div style="font-family:var(--font-mono);font-weight:700;color:var(--accent2);font-size:1rem;margin-bottom:1rem">claude code — deep technical analysis</div>
+  <p>File-by-file analysis of 512K+ lines of TypeScript.</p>
+  <p style="margin-top:0.5rem;font-size:0.75rem;color:var(--text3)">Generated with Claude Code</p>
+</footer>
+
+<script>
+// Scroll progress
+window.addEventListener('scroll', () => {
+  const p = (document.documentElement.scrollTop / (document.documentElement.scrollHeight - window.innerHeight)) * 100;
+  document.getElementById('scrollProgress').style.width = p + '%';
+});
+
+// Nav hide on scroll
+let lastScroll = 0;
+window.addEventListener('scroll', () => {
+  const cur = window.scrollY;
+  document.getElementById('nav').classList.toggle('hidden', cur > lastScroll && cur > 200);
+  lastScroll = cur;
+});
+
+// Nav active link
+const navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+const sections = document.querySelectorAll('section[id]');
+window.addEventListener('scroll', () => {
+  const pos = window.scrollY + 200;
+  sections.forEach(s => {
+    const link = document.querySelector(`.nav-links a[href="#${s.id}"]`);
+    if (link) link.classList.toggle('active', pos >= s.offsetTop && pos < s.offsetTop + s.offsetHeight);
+  });
+});
+
+// Card toggle
+function toggle(card) {
+  card.classList.toggle('open');
+}
+
+// Intersection observer for animations
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.animate').forEach(el => obs.observe(el));
+
+// Smooth scroll
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+</script>
+</body>
+</html>

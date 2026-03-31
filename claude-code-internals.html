@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Code — Internals & Implementation Details</title>
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Claude Code — Internals & Implementation Details">
+<meta property="og:description" content="The deepest layer: startup parallelism, React/Ink rendering pipeline, message types, extensibility stack, transport protocols, system prompt construction, agent process model.">
+<meta property="og:image" content="og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Claude Code — Internals & Implementation Details">
+<meta name="twitter:description" content="Startup tricks, Ink rendering, message hierarchies, skills/plugins/hooks, transport protocols, and the full system prompt structure.">
+<meta name="twitter:image" content="og-image.png">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#09090b;--bg2:#111114;--bg3:#18181b;--bg4:#27272a;
+  --text:#fafafa;--text2:#a1a1aa;--text3:#71717a;
+  --accent:#8b5cf6;--accent2:#a78bfa;--accent3:#6d28d9;
+  --green:#22c55e;--green2:#4ade80;
+  --blue:#3b82f6;--blue2:#60a5fa;
+  --orange:#f97316;--orange2:#fb923c;
+  --red:#ef4444;--pink:#ec4899;--cyan:#06b6d4;--yellow:#eab308;
+  --radius:12px;--radius-sm:8px;
+  --font-mono:'SF Mono','Cascadia Code','Fira Code',monospace;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --transition:0.3s cubic-bezier(0.4,0,0.2,1);
+}
+html{scroll-behavior:smooth;font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);line-height:1.7;overflow-x:hidden}
+a{color:var(--accent2);text-decoration:none}a:hover{text-decoration:underline}
+.scroll-progress{position:fixed;top:0;left:0;height:3px;background:linear-gradient(90deg,var(--red),var(--orange),var(--yellow),var(--green),var(--blue),var(--accent));z-index:1000;width:0%}
+nav{position:fixed;top:0;left:0;right:0;z-index:999;backdrop-filter:blur(20px);background:rgba(9,9,11,0.85);border-bottom:1px solid var(--bg4);transition:transform var(--transition)}
+nav.hidden{transform:translateY(-100%)}
+.nav-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 2rem}
+.nav-logo{font-family:var(--font-mono);font-weight:700;font-size:0.9rem;color:var(--orange2);display:flex;align-items:center;gap:8px}
+.nav-logo .dot{width:8px;height:8px;border-radius:50%;background:var(--orange);animation:pulse 2s ease infinite}
+.nav-links{display:flex;gap:4px;flex-wrap:wrap}
+.nav-links a{padding:6px 12px;border-radius:var(--radius-sm);font-size:0.72rem;color:var(--text2);transition:all var(--transition);font-family:var(--font-mono)}
+.nav-links a:hover,.nav-links a.active{background:var(--bg3);color:var(--text);text-decoration:none}
+.container{max-width:1200px;margin:0 auto;padding:0 2rem}
+section{padding:4.5rem 0}
+.section-label{font-family:var(--font-mono);font-size:0.7rem;text-transform:uppercase;letter-spacing:3px;color:var(--orange);margin-bottom:0.75rem}
+.section-title{font-size:clamp(1.8rem,4vw,2.8rem);font-weight:800;line-height:1.15;margin-bottom:0.75rem}
+.section-desc{font-size:1rem;color:var(--text2);max-width:700px;margin-bottom:2.5rem}
+.divider{height:1px;background:linear-gradient(90deg,transparent,var(--bg4),transparent)}
+.card{background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius);overflow:hidden;transition:border-color var(--transition);margin-bottom:1.25rem}
+.card:hover{border-color:rgba(249,115,22,0.3)}
+.card-header{padding:1.15rem 1.5rem;cursor:pointer;display:flex;align-items:center;gap:1rem;user-select:none}
+.card-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+.ci-purple{background:rgba(139,92,246,0.15)}.ci-blue{background:rgba(59,130,246,0.15)}.ci-green{background:rgba(34,197,94,0.15)}.ci-orange{background:rgba(249,115,22,0.15)}.ci-pink{background:rgba(236,72,153,0.15)}.ci-cyan{background:rgba(6,182,212,0.15)}.ci-red{background:rgba(239,68,68,0.15)}.ci-yellow{background:rgba(234,179,8,0.15)}
+.card-info{flex:1}.card-name{font-weight:700;font-size:0.95rem}.card-brief{font-size:0.76rem;color:var(--text3);margin-top:2px}
+.card-meta{font-family:var(--font-mono);font-size:0.68rem;color:var(--text3);display:flex;gap:12px;margin-top:4px}
+.card-toggle{width:20px;height:20px;color:var(--text3);transition:transform var(--transition);flex-shrink:0}
+.card.open .card-toggle{transform:rotate(180deg)}
+.card-body{max-height:0;overflow:hidden;transition:max-height 0.6s cubic-bezier(0.4,0,0.2,1)}
+.card.open .card-body{max-height:30000px}
+.card-content{padding:0 1.5rem 1.5rem;border-top:1px solid var(--bg4)}
+.card-content p{color:var(--text2);font-size:0.88rem;margin:0.9rem 0}
+.card-content h4{color:var(--text);font-size:0.82rem;margin:1.3rem 0 0.5rem;font-family:var(--font-mono);display:flex;align-items:center;gap:8px}
+.card-content h4::before{content:'';width:3px;height:14px;background:var(--orange);border-radius:2px}
+.card-content ul{list-style:none;padding:0}.card-content li{padding:4px 0;padding-left:1.4rem;position:relative;color:var(--text2);font-size:0.83rem}
+.card-content li::before{content:'';position:absolute;left:0;top:12px;width:5px;height:5px;border-radius:50%;background:var(--bg4)}
+.card-content code{background:var(--bg3);padding:2px 6px;border-radius:4px;font-size:0.76rem;font-family:var(--font-mono);color:var(--orange2)}
+.card-content strong{color:var(--text)}
+.cb{background:var(--bg);border:1px solid var(--bg4);border-radius:var(--radius-sm);padding:1rem 1.2rem;font-family:var(--font-mono);font-size:0.74rem;line-height:1.8;overflow-x:auto;margin:0.75rem 0;color:var(--text2);white-space:pre;tab-size:2}
+.cb .kw{color:var(--accent2)}.cb .fn{color:var(--blue2)}.cb .str{color:var(--green2)}.cb .cmt{color:var(--text3)}.cb .num{color:var(--orange2)}.cb .type{color:var(--cyan)}
+.tw{overflow-x:auto;margin:1rem 0}
+table{width:100%;border-collapse:collapse;font-size:0.8rem}
+th{text-align:left;padding:9px 12px;background:var(--bg3);color:var(--text);font-weight:600;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--bg4)}
+td{padding:9px 12px;border-bottom:1px solid var(--bg4);color:var(--text2);vertical-align:top}
+tr:hover td{background:rgba(249,115,22,0.03)}
+.callout{padding:0.9rem 1.1rem;border-radius:var(--radius-sm);margin:1rem 0;font-size:0.83rem;display:flex;gap:10px;align-items:flex-start}
+.callout.warn{background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.2);color:var(--yellow)}
+.callout.info{background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:var(--blue2)}
+.callout.danger{background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);color:var(--red)}
+.callout.success{background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:var(--green2)}
+.ci{font-size:1rem;flex-shrink:0;margin-top:1px}
+.pipeline{display:flex;flex-direction:column;gap:0;margin:1rem 0}
+.ps{display:flex;align-items:stretch;gap:0}
+.pn{width:36px;min-width:36px;display:flex;flex-direction:column;align-items:center}
+.pn .c{width:26px;height:26px;border-radius:50%;background:var(--bg3);border:2px solid var(--bg4);display:flex;align-items:center;justify-content:center;font-size:0.68rem;font-weight:700;font-family:var(--font-mono);color:var(--text2);z-index:1}
+.pn .l{flex:1;width:2px;background:var(--bg4)}
+.pi{flex:1;padding:3px 0 18px 14px}
+.pi h5{font-size:0.8rem;font-weight:600;margin-bottom:1px}
+.pi p{font-size:0.75rem;color:var(--text3)}
+#hero{min-height:50vh;display:flex;flex-direction:column;justify-content:center;padding-top:80px}
+.hero-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 14px;border-radius:100px;border:1px solid var(--bg4);background:var(--bg2);font-size:0.75rem;color:var(--text2);margin-bottom:1.5rem;font-family:var(--font-mono);width:fit-content}
+.hero-badge .live{width:6px;height:6px;border-radius:50%;background:var(--orange);animation:pulse 2s ease infinite}
+h1.hero-title{font-size:clamp(2.2rem,5vw,4rem);font-weight:900;line-height:1.05;margin-bottom:1rem}
+h1.hero-title .gradient{background:linear-gradient(135deg,var(--orange2),var(--red),var(--pink));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:1.05rem;color:var(--text2);max-width:650px;margin-bottom:2rem}
+.hero-links{display:flex;gap:10px;flex-wrap:wrap}
+.hero-links a{padding:9px 18px;border-radius:var(--radius-sm);font-size:0.82rem;font-family:var(--font-mono);transition:all var(--transition)}
+.hero-links .primary{background:var(--orange);color:white}.hero-links .primary:hover{background:var(--orange2);text-decoration:none}
+.hero-links .secondary{border:1px solid var(--bg4);color:var(--text2)}.hero-links .secondary:hover{border-color:var(--orange);color:var(--text);text-decoration:none}
+/* Two-col grid */
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:1.25rem}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@media(max-width:768px){.container{padding:0 1.25rem}section{padding:3rem 0}.grid-2{grid-template-columns:1fr}table{font-size:0.72rem}th,td{padding:7px 9px}.nav-links{display:none}}
+</style>
+</head>
+<body>
+
+<div class="scroll-progress" id="scrollProgress"></div>
+<nav id="nav"><div class="nav-inner">
+  <div class="nav-logo"><span class="dot"></span> internals</div>
+  <div class="nav-links">
+    <a href="claude-code-guide.html">Overview</a>
+    <a href="claude-code-deep-dive.html">Deep Dive</a>
+    <a href="#startup">Startup</a>
+    <a href="#rendering">Rendering</a>
+    <a href="#messages">Messages</a>
+    <a href="#extensibility">Extensibility</a>
+    <a href="#transport">Transport</a>
+    <a href="#infra">Infrastructure</a>
+    <a href="#prompt">Prompt</a>
+    <a href="#agents">Agents</a>
+    <a href="#session">Session</a>
+  </div>
+</div></nav>
+
+<div class="container">
+<section id="hero">
+  <div class="hero-badge"><span class="live"></span> Level 3 — Implementation Details</div>
+  <h1 class="hero-title"><span class="gradient">The Internals</span></h1>
+  <p class="hero-sub">The deepest layer — startup parallelism tricks, terminal rendering pipeline, message type hierarchies, the hook/skill/plugin extensibility stack, transport protocols, and the analytics pipeline.</p>
+  <div class="hero-links">
+    <a href="claude-code-guide.html" class="secondary">Overview</a>
+    <a href="claude-code-deep-dive.html" class="secondary">Deep Dive</a>
+  </div>
+</section>
+</div>
+<div class="divider"></div>
+
+<!-- ==================== STARTUP ==================== -->
+<div class="container"><section id="startup">
+  <div class="section-label">Startup Sequence</div>
+  <div class="section-title">Boot Optimization — Parallel Prefetch Strategy</div>
+  <div class="section-desc">Claude Code's startup is heavily optimized. Three subprocesses fire during module evaluation, running in parallel with ~135ms of imports.</div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-orange">🚀</div>
+    <div class="card-info"><div class="card-name">Critical Side-Effect Parallelization</div><div class="card-brief">Three subprocesses fire at module eval time — before any function runs</div>
+    <div class="card-meta"><span>Lines 9-20 of main.tsx</span><span>~0ms main thread cost</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <p>These execute <strong>during module evaluation</strong>, before any function call:</p>
+    <div class="cb"><span class="cmt">// main.tsx lines 9-20 — TOP-LEVEL SIDE EFFECTS</span>
+<span class="fn">profileCheckpoint</span>(<span class="str">'main_tsx_entry'</span>)     <span class="cmt">// 1. High-res timer mark</span>
+
+<span class="fn">startMdmRawRead</span>()                      <span class="cmt">// 2. Spawn plutil/reg subprocess</span>
+<span class="cmt">// macOS: plutil for each plist path IN PARALLEL, take first winner</span>
+<span class="cmt">// Windows: reg query for HKLM and HKCU IN PARALLEL</span>
+<span class="cmt">// Linux: no-op</span>
+
+<span class="fn">startKeychainPrefetch</span>()                  <span class="cmt">// 3. Spawn TWO keychain reads</span>
+<span class="cmt">// OAuth creds: security find-generic-password -s "Claude Code-credentials" (~32ms)</span>
+<span class="cmt">// Legacy key:  security find-generic-password -s "Claude Code" (~33ms)</span>
+<span class="cmt">// Without prefetch: ~65ms SEQUENTIAL reads in applySafeConfigEnvironmentVariables()</span></div>
+
+    <div class="callout info"><span class="ci">i</span><span>These subprocesses run <strong>in parallel with ~135ms of remaining module imports</strong>. Results are consumed in the preAction hook via <code>Promise.all([ensureMdmSettingsLoaded(), ensureKeychainPrefetchCompleted()])</code> — nearly zero cost to main thread.</span></div>
+
+    <h4>Full Initialization Timeline</h4>
+    <div class="tw"><table>
+      <tr><th>Phase</th><th>Location</th><th>Timing</th><th>Blocking?</th></tr>
+      <tr><td>Process env setup</td><td>cli.tsx:1-26</td><td>Immediate</td><td>Yes</td></tr>
+      <tr><td>Fast-path detection</td><td>cli.tsx:37-275</td><td>&lt;1ms</td><td>Yes — --version exits immediately</td></tr>
+      <tr><td><strong>Side-effect prefetches</strong></td><td><strong>main.tsx:9-20</strong></td><td><strong>Parallel with imports</strong></td><td><strong>No</strong></td></tr>
+      <tr><td>Module imports</td><td>main.tsx</td><td>~135ms</td><td>Yes</td></tr>
+      <tr><td>Commander.js init</td><td>main.tsx:890-903</td><td>~10ms</td><td>Yes</td></tr>
+      <tr><td>preAction: init()</td><td>init.ts (memoized)</td><td>~100-200ms</td><td>Yes</td></tr>
+      <tr><td>preAction: migrations</td><td>main.tsx:950</td><td>~5ms</td><td>Yes (sync)</td></tr>
+      <tr><td>setup()</td><td>setup.ts</td><td>~50-200ms</td><td>Partially</td></tr>
+      <tr><td>REPL first render</td><td>screens/REPL.tsx</td><td>~200-500ms</td><td>Yes</td></tr>
+      <tr><td><strong>Deferred prefetches</strong></td><td><strong>main.tsx:388-431</strong></td><td><strong>After first render</strong></td><td><strong>No (fire-and-forget)</strong></td></tr>
+    </table></div>
+
+    <h4>Startup Profiler — 0.5% Sampling</h4>
+    <p>Profiling only enabled for 0.5% of external users (100% internal). Non-sampled users pay <strong>zero profiling cost</strong> — the checkpoint function returns immediately.</p>
+
+    <h4>What --bare Mode Skips</h4>
+    <ul>
+      <li>Plugin hooks loading, skill change detectors</li>
+      <li>Attribution hooks, session file access hooks</li>
+      <li>Team memory watcher, all deferred prefetches</li>
+      <li>Terminal backup restoration</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-blue">⚡</div>
+    <div class="card-info"><div class="card-name">init() — The Core Initialization Function</div><div class="card-brief">Memoized, runs exactly once. Configs, TLS, network, scratchpad, cleanup hooks</div>
+    <div class="card-meta"><span>entrypoints/init.ts</span><span>Memoized via memoize()</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="pipeline">
+      <div class="ps"><div class="pn"><div class="c">1</div><div class="l"></div></div><div class="pi"><h5>enableConfigs()</h5><p>Validate and enable configuration system</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">2</div><div class="l"></div></div><div class="pi"><h5>applySafeConfigEnvironmentVariables()</h5><p>Apply only safe env vars (OAuth, API key from prefetch). Unsafe vars deferred until after trust dialog</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">3</div><div class="l"></div></div><div class="pi"><h5>applyExtraCACertsFromConfig()</h5><p>Add NODE_EXTRA_CA_CERTS BEFORE first TLS handshake — Bun caches TLS store at boot via BoringSSL</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">4</div><div class="l"></div></div><div class="pi"><h5>setupGracefulShutdown()</h5><p>Register SIGINT/SIGTERM handlers, cleanup callbacks</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">5</div><div class="l"></div></div><div class="pi"><h5>Async fire-and-forget work</h5><p>1P event logging, OAuth population, JetBrains detection, GitHub repo detection, remote settings loading</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">6</div><div class="l"></div></div><div class="pi"><h5>configureGlobalMTLS() → configureGlobalAgents()</h5><p>SEQUENTIAL: mTLS config first, then proxy agents use correct transport</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">7</div><div class="l"></div></div><div class="pi"><h5>preconnectAnthropicApi()</h5><p>TCP+TLS handshake hidden under action handler work — connection ready before first API call</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">8</div></div><div class="pi"><h5>Cleanup registrations</h5><p>LSP shutdown, team cleanup, scratchpad directory creation</p></div></div>
+    </div>
+
+    <div class="callout warn"><span class="ci">!</span><span><strong>CA certs timing is critical:</strong> <code>applyExtraCACertsFromConfig()</code> must run before any TLS handshake because Bun's BoringSSL caches the cert store on first use. Adding certs after the first HTTPS request has no effect.</span></div>
+  </div></div></div>
+</section></div>
+<div class="divider"></div>
+
+<!-- ==================== RENDERING ==================== -->
+<div class="container"><section id="rendering">
+  <div class="section-label">Terminal UI</div>
+  <div class="section-title">React/Ink Rendering Pipeline</div>
+  <div class="section-desc">React components render to a cell buffer via Yoga layout, then blit to ANSI terminal codes. Here's the full pipeline.</div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-cyan">🎨</div>
+    <div class="card-info"><div class="card-name">Ink Rendering Pipeline — React → ANSI</div><div class="card-brief">How React elements become terminal output: reconciliation → Yoga layout → cell buffer → ANSI diff</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="cb"><span class="cmt">// Rendering pipeline (per frame)</span>
+
+React Element Tree
+       ↓
+<span class="fn">reconciler.updateContainerSync</span>()  <span class="cmt">// React 19 reconciliation</span>
+       ↓
+<span class="fn">markDirty</span>() on affected nodes      <span class="cmt">// Dirty tracking</span>
+       ↓
+<span class="fn">calculateLayout</span>(width)             <span class="cmt">// Yoga flexbox: width/height/flex per node</span>
+       ↓
+<span class="fn">setCellStyleId</span>() per node          <span class="cmt">// Style interning via StylePool</span>
+       ↓
+<span class="fn">renderNodeToOutput</span>(root, output)   <span class="cmt">// Walk tree, paint cells</span>
+       ↓
+output.get() → Screen               <span class="cmt">// Cell array buffer (row × col)</span>
+       ↓
+<span class="fn">blit</span>(prevScreen, newScreen)         <span class="cmt">// Compare: skip unchanged cells</span>
+       ↓
+<span class="fn">renderToScreen</span>() → ANSI codes      <span class="cmt">// Write diff to stdout</span></div>
+
+    <h4>Key Differences from Browser React</h4>
+    <div class="tw"><table>
+      <tr><th>Aspect</th><th>Ink (Terminal)</th><th>Browser React</th></tr>
+      <tr><td>Output</td><td>ANSI sequences to TTY</td><td>DOM to browser</td></tr>
+      <tr><td>Layout</td><td>Yoga flexbox → cell buffer (W×H)</td><td>CSS → paint tree</td></tr>
+      <tr><td>Diffing</td><td>Compare prev/curr cell arrays</td><td>Reconcile DOM nodes</td></tr>
+      <tr><td>Input</td><td>stdin key events → useInput hook</td><td>DOM event listeners</td></tr>
+      <tr><td>Scrolling</td><td>App-level ScrollBox component</td><td>OS scrollbar</td></tr>
+      <tr><td>Fullscreen</td><td>ANSI alt-screen buffer</td><td>No equivalent</td></tr>
+      <tr><td>Colors</td><td>256 + RGB ANSI codes</td><td>CSS colors</td></tr>
+      <tr><td>Links</td><td>OSC 8 hyperlink protocol</td><td>&lt;a&gt; tags</td></tr>
+    </table></div>
+
+    <h4>Performance Optimizations</h4>
+    <ul>
+      <li><strong>StylePool / CharPool</strong> — intern styles and chars for reuse across cells</li>
+      <li><strong>Blit optimization</strong> — skip unchanged cells when <code>prevScreen</code> is clean</li>
+      <li><strong>VirtualMessageList</strong> — only render visible messages + 2-row buffer</li>
+      <li><strong>useDeferredValue</strong> — batch streaming updates, keep input responsive</li>
+      <li><strong>Ratchet component</strong> — lock height to max-ever-seen during streaming (prevents jitter)</li>
+      <li><strong>AnimatedTerminalTitle</strong> — 960ms tick isolated from REPL re-renders</li>
+      <li><strong>React Compiler</strong> — auto-memoization via <code>_c()</code> primitives</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-purple">📐</div>
+    <div class="card-info"><div class="card-name">REPL Component Tree — Full Hierarchy</div><div class="card-brief">The exact React component tree from AlternateScreen down to PromptInput</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="cb" style="font-size:0.7rem;line-height:1.7"><span class="type">AlternateScreen</span>  <span class="cmt">// ANSI alt-screen buffer</span>
+└─ <span class="type">KeybindingSetup</span>  <span class="cmt">// Context provider for hotkeys</span>
+   ├─ <span class="fn">AnimatedTerminalTitle</span>  <span class="cmt">// 960ms isolated tick</span>
+   ├─ <span class="fn">GlobalKeybindingHandlers</span>  <span class="cmt">// app:*, Ctrl+C</span>
+   ├─ <span class="fn">VoiceKeybindingHandler</span>  <span class="cmt">// (conditional VOICE_MODE)</span>
+   ├─ <span class="fn">CommandKeybindingHandlers</span>  <span class="cmt">// command:* action registry</span>
+   ├─ <span class="fn">ScrollKeybindingHandler</span>  <span class="cmt">// g/G/j/k, PgUp/PgDn</span>
+   └─ <span class="type">MCPConnectionManager</span>
+      └─ <span class="type">FullscreenLayout</span>  <span class="cmt">// scrollable + bottom slots</span>
+         ├─ scrollable=
+         │  ├─ <span class="fn">Messages</span>  <span class="cmt">// VirtualMessageList (virtualized)</span>
+         │  │  └─ <span class="fn">VirtualMessageRow</span>  <span class="cmt">// per message, memoized</span>
+         │  │     └─ <span class="fn">Ratchet</span>  <span class="cmt">// height lock during streaming</span>
+         │  │        └─ UserMessage | AssistantMessage | SystemMessage
+         │  ├─ <span class="fn">SpinnerWithVerb</span>  <span class="cmt">// useAnimationFrame(50ms)</span>
+         │  └─ <span class="fn">PromptInputQueuedCommands</span>
+         │
+         └─ bottom=  <span class="cmt">// sticky footer, never scrolls</span>
+            ├─ <span class="fn">CompanionSprite</span>  <span class="cmt">// (narrow mode)</span>
+            ├─ <span class="fn">TaskListV2</span>  <span class="cmt">// expanded tasks</span>
+            ├─ <span class="fn">PermissionRequest</span>  <span class="cmt">// tool permission dialog</span>
+            ├─ <span class="fn">PromptDialog</span>  <span class="cmt">// hook prompt dialog</span>
+            ├─ <span class="fn">ElicitationDialog</span>  <span class="cmt">// MCP elicitation</span>
+            └─ <span class="type">PromptInput</span>  <span class="cmt">// main text input</span>
+               ├─ TextInput | VimTextInput
+               ├─ <span class="fn">PromptInputFooter</span>
+               │  ├─ PromptInputFooterLeftSide
+               │  └─ PromptInputFooterSuggestions
+               ├─ <span class="fn">Notifications</span>
+               └─ <span class="fn">ShimmeredInput</span></div>
+  </div></div></div>
+</section></div>
+<div class="divider"></div>
+
+<!-- ==================== MESSAGES ==================== -->
+<div class="container"><section id="messages">
+  <div class="section-label">Type System</div>
+  <div class="section-title">Message Hierarchy & Session Storage</div>
+  <div class="section-desc">Every message is a discriminated union. 13 system message subtypes, tool result pairing invariants, and JSONL session storage with lazy reading.</div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-blue">📨</div>
+    <div class="card-info"><div class="card-name">Message Type Hierarchy</div><div class="card-brief">Discriminated unions: 5 primary types, 13 system subtypes, message origin tracking</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="cb"><span class="cmt">// Primary types (discriminated by .type)</span>
+Message =
+  | <span class="type">AssistantMessage</span>   <span class="cmt">// API model responses (content[], usage, model)</span>
+  | <span class="type">UserMessage</span>        <span class="cmt">// User input + tool results</span>
+  | <span class="type">SystemMessage</span>      <span class="cmt">// Framework notifications (13 subtypes)</span>
+  | <span class="type">AttachmentMessage</span>  <span class="cmt">// Structured data containers</span>
+  | <span class="type">ProgressMessage</span>    <span class="cmt">// Ephemeral tool progress (NOT persisted)</span>
+  | <span class="type">TombstoneMessage</span>   <span class="cmt">// Deleted message markers</span>
+
+<span class="cmt">// System message subtypes (discriminated by .subtype)</span>
+SystemMessage.subtype =
+  | <span class="str">'informational'</span>       <span class="cmt">// General info/warning/error with level</span>
+  | <span class="str">'api_error'</span>           <span class="cmt">// API failures (retryInMs, retryAttempt)</span>
+  | <span class="str">'local_command'</span>       <span class="cmt">// Local command output</span>
+  | <span class="str">'stop_hook_summary'</span>   <span class="cmt">// Stop hook results</span>
+  | <span class="str">'compact_boundary'</span>    <span class="cmt">// Compaction landmark</span>
+  | <span class="str">'microcompact_boundary'</span> <span class="cmt">// Cache-editing marker</span>
+  | <span class="str">'thinking'</span>            <span class="cmt">// Extended thinking content</span>
+  | <span class="str">'memory_saved'</span>        <span class="cmt">// Session memory persistence</span>
+  | <span class="str">'turn_duration'</span>       <span class="cmt">// Turn execution metrics</span>
+  | <span class="str">'api_metrics'</span>         <span class="cmt">// TTFT, tokens/sec, durations</span>
+  | <span class="str">'permission_retry'</span>    <span class="cmt">// Permission decision retry</span>
+  | <span class="str">'bridge_status'</span>       <span class="cmt">// Bridge connectivity</span>
+  | <span class="str">'away_summary'</span>        <span class="cmt">// Away mode summary</span></div>
+
+    <h4>Message Origin Tracking</h4>
+    <div class="tw"><table>
+      <tr><th>Origin</th><th>Meaning</th></tr>
+      <tr><td><code>undefined</code></td><td>Human (typed at keyboard)</td></tr>
+      <tr><td><code>'agent'</code></td><td>Forked async sub-agent</td></tr>
+      <tr><td><code>'teammate'</code></td><td>In-process team agent</td></tr>
+      <tr><td><code>'command'</code></td><td>Built-in command output</td></tr>
+      <tr><td><code>'system'</code></td><td>Framework internal</td></tr>
+      <tr><td><code>'hook'</code></td><td>Hook execution result</td></tr>
+    </table></div>
+
+    <h4>Tool Result Pairing Invariant</h4>
+    <p>Every <code>tool_use</code> block MUST have a matching <code>tool_result</code>. If a tool result is missing (crash, timeout), <code>ensureToolResultPairing()</code> inserts a synthetic placeholder: <code>[Tool result missing due to internal error]</code>. This is enforced before every API call.</p>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-green">💾</div>
+    <div class="card-info"><div class="card-name">Session Storage — JSONL Format with Lazy Reading</div><div class="card-brief">Append-only JSONL files per session, 50MB read cap, head/tail lazy loading</div>
+    <div class="card-meta"><span>5,106 lines</span><span>MAX_TRANSCRIPT_READ_BYTES = 50MB</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Storage Paths</h4>
+    <div class="cb"><span class="cmt">// Session transcript</span>
+~/.claude/projects/<span class="str">{projectDir}</span>/<span class="str">{sessionId}</span>.jsonl
+
+<span class="cmt">// Agent transcript (sub-agents)</span>
+<span class="str">{projectDir}</span>/<span class="str">{sessionId}</span>/subagents/<span class="str">{subdir}</span>/agent-<span class="str">{agentId}</span>.jsonl
+
+<span class="cmt">// Agent metadata sidecar</span>
+<span class="str">{agentTranscriptPath}</span>.meta.json</div>
+
+    <h4>JSONL Entry Types</h4>
+    <ul>
+      <li><strong>TranscriptMessage</strong> — user, assistant, attachment, system messages (core conversation)</li>
+      <li><strong>ContentReplacementEntry</strong> — lazy content replacement markers</li>
+      <li><strong>ContextCollapseSnapshotEntry</strong> — collapse state snapshots</li>
+      <li><strong>FileHistorySnapshotMessage</strong> — file state backups</li>
+      <li><strong>QueueOperationMessage</strong> — queued command operations</li>
+    </ul>
+    <p><strong>ProgressMessages are NOT persisted</strong> — they're ephemeral UI state only. Old transcripts containing progress messages are rewritten on load.</p>
+
+    <h4>Lazy Reading via readHeadAndTail()</h4>
+    <p>Reads first/last N bytes via 64KB-256KB buffers. Extracts JSON fields without loading the full file. Used for loading most recent messages before a full transcript read. Sessions can grow to multiple GB.</p>
+  </div></div></div>
+</section></div>
+<div class="divider"></div>
+
+<!-- ==================== EXTENSIBILITY ==================== -->
+<div class="container"><section id="extensibility">
+  <div class="section-label">Extensibility Stack</div>
+  <div class="section-title">Skills, Plugins, and Hooks</div>
+  <div class="section-desc">Three layers of extensibility — from simple markdown prompts to full lifecycle event hooks with shell/HTTP commands.</div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-green">⚡</div>
+    <div class="card-info"><div class="card-name">Skills — Markdown-Based Reusable Workflows</div><div class="card-brief">YAML frontmatter + markdown prompts, bundled or from disk, lazy file extraction</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Skill File Format</h4>
+    <div class="cb"><span class="cmt">---</span>
+<span class="kw">name</span>: my-skill
+<span class="kw">description</span>: What this does
+<span class="kw">arguments</span>: [arg1, arg2]
+<span class="kw">allowed-tools</span>: [Read, Write, Bash]
+<span class="kw">model</span>: inherit
+<span class="kw">user-invocable</span>: <span class="num">true</span>
+<span class="kw">context</span>: fork  <span class="cmt"># Isolated execution</span>
+<span class="kw">hooks</span>:
+  <span class="kw">PermissionRequest</span>:
+    - <span class="kw">command</span>: validate-input.sh
+<span class="cmt">---</span>
+
+# Skill prompt content in Markdown
+Analyze the codebase and $ARGUMENTS...</div>
+
+    <h4>Discovery Locations</h4>
+    <ul>
+      <li><code>~/.claude/skills/</code> — User global skills</li>
+      <li><code>.claude/skills/</code> — Project-specific skills</li>
+      <li><code>src/skills/bundled/</code> — Built-in skills (16 total)</li>
+      <li>MCP servers — Skills via MCP protocol</li>
+    </ul>
+
+    <h4>Bundled Skill File Extraction</h4>
+    <p>Skills with embedded <code>files</code> field have their reference files extracted to a nonce-protected directory on first invocation. Uses <code>O_NOFOLLOW</code> + <code>O_EXCL</code> flags to prevent symlink attacks, <code>0o700</code> mode for owner-only access. Extraction is memoized per process.</p>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-purple">🔌</div>
+    <div class="card-info"><div class="card-name">Plugins — Full Extension Packages</div><div class="card-brief">Collections of skills, agents, hooks, and MCP servers. 3,303-line loader</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Plugin Directory Structure</h4>
+    <div class="cb">my-plugin/
+├── plugin.json          <span class="cmt"># Manifest (name, version, author, mcpServers)</span>
+├── commands/            <span class="cmt"># Slash commands (*.md)</span>
+├── agents/              <span class="cmt"># Custom AI agents (*.md)</span>
+├── skills/              <span class="cmt"># Skills (*.md)</span>
+└── hooks/
+    └── hooks.json       <span class="cmt"># Lifecycle hook configuration</span></div>
+
+    <h4>Plugin Sources</h4>
+    <ul>
+      <li><strong>Marketplace</strong> — Downloaded from git repo, versioned cache at <code>~/.claude/plugins/cache/</code></li>
+      <li><strong>Local</strong> — From filesystem (<code>.claude/plugins/</code> or <code>~/.claude/plugins/</code>)</li>
+      <li><strong>Built-in</strong> — Registered via <code>registerBuiltinPlugin()</code>, enable/disable via settings</li>
+      <li><strong>Inline</strong> — Passed via Agent SDK's <code>getInlinePlugins()</code></li>
+    </ul>
+
+    <div class="callout danger"><span class="ci">!</span><span><strong>No sandboxing:</strong> Plugins execute in-process with full permissions. A malicious plugin has the same access as Claude Code itself. This is the biggest extensibility security gap.</span></div>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-orange">🪝</div>
+    <div class="card-info"><div class="card-name">Hooks — Lifecycle Event System</div><div class="card-brief">Shell/HTTP/prompt/agent hooks at 15+ lifecycle events. Matcher patterns, async support</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Hook Events (15+)</h4>
+    <div class="cb"><span class="type">HookEvent</span> =
+  <span class="str">'SessionStart'</span>        <span class="cmt">// Session begins</span>
+  <span class="str">'Setup'</span>               <span class="cmt">// After trust dialog</span>
+  <span class="str">'UserPromptSubmit'</span>    <span class="cmt">// Before querying model</span>
+  <span class="str">'PreToolUse'</span>          <span class="cmt">// Before tool runs (can modify input)</span>
+  <span class="str">'PostToolUse'</span>         <span class="cmt">// After tool completes (add context)</span>
+  <span class="str">'PermissionRequest'</span>   <span class="cmt">// Before tool execution (allow/deny/ask)</span>
+  <span class="str">'PermissionDenied'</span>    <span class="cmt">// Permission was denied</span>
+  <span class="str">'SubagentStart'</span>       <span class="cmt">// Sub-agent spawns</span>
+  <span class="str">'SubagentStop'</span>        <span class="cmt">// Sub-agent exits</span>
+  <span class="str">'FileChanged'</span>         <span class="cmt">// File modified</span>
+  <span class="str">'CwdChanged'</span>          <span class="cmt">// Working directory changed</span>
+  <span class="str">'SessionEnd'</span>          <span class="cmt">// Session exit</span>
+  | ...</div>
+
+    <h4>Four Hook Types</h4>
+    <div class="tw"><table>
+      <tr><th>Type</th><th>Mechanism</th><th>Use Case</th></tr>
+      <tr><td><code>command</code></td><td>Shell command execution</td><td>Validation scripts, linters, security checks</td></tr>
+      <tr><td><code>prompt</code></td><td>LLM evaluation of a prompt</td><td>AI-powered validation, content classification</td></tr>
+      <tr><td><code>http</code></td><td>Webhook POST to URL</td><td>External service integration, Slack notifications</td></tr>
+      <tr><td><code>agent</code></td><td>Agentic verifier (spawns sub-agent)</td><td>Complex multi-step verification</td></tr>
+    </table></div>
+
+    <h4>Hook I/O Protocol</h4>
+    <p>Hooks receive context via <code>HOOK_INPUT</code> env var (JSON). They respond via JSON on stdout. Key outputs:</p>
+    <ul>
+      <li><strong>permissionDecision</strong> — <code>'allow' | 'deny' | 'ask'</code> for PermissionRequest hooks</li>
+      <li><strong>updatedInput</strong> — Modified tool input for PreToolUse hooks</li>
+      <li><strong>additionalContext</strong> — Extra context for PostToolUse hooks</li>
+      <li><strong>continue: false</strong> — Stop the session</li>
+      <li><strong>async: true</strong> — Mark as background hook (uses asyncRewake pattern)</li>
+    </ul>
+
+    <h4>Matcher Patterns</h4>
+    <div class="cb"><span class="cmt">// Restrict hook to specific tools + arguments</span>
+<span class="str">"Bash(git *)"</span>       <span class="cmt">// Only git commands</span>
+<span class="str">"FileEdit(/src/*)"</span>  <span class="cmt">// Only edits in /src/</span>
+<span class="str">"*"</span>                 <span class="cmt">// All tools</span></div>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-pink">🧠</div>
+    <div class="card-info"><div class="card-name">Memory Extraction — Background Memory Agent</div><div class="card-brief">Forked sub-agent that extracts actionable memories after each conversation turn</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <p>After the model produces a final response with no tool calls, a <strong>forked sub-agent</strong> runs in the background to extract memories.</p>
+
+    <h4>Restricted Capabilities</h4>
+    <ul>
+      <li><strong>Allowed:</strong> Read, Grep, Glob, read-only Bash (ls, find, stat, head, tail)</li>
+      <li><strong>Allowed:</strong> Edit/Write ONLY to memory directories</li>
+      <li><strong>Banned:</strong> Edit/Write outside memory, rm, any destructive operations</li>
+    </ul>
+
+    <h4>Memory Directory Structure</h4>
+    <div class="cb">~/.claude/projects/<span class="str">{slug}</span>/memory/
+├── MEMORY.md           <span class="cmt"># Index (max 200 lines, 25KB)</span>
+├── user_role.md        <span class="cmt"># User behavior memories</span>
+├── feedback_testing.md <span class="cmt"># Correction memories</span>
+├── project_goals.md    <span class="cmt"># Project context</span>
+└── reference_links.md  <span class="cmt"># External references</span></div>
+
+    <h4>Memory Types</h4>
+    <ul>
+      <li><strong>User</strong> — Facts about the person, preferences, role, knowledge level</li>
+      <li><strong>Feedback</strong> — Corrections and confirmed approaches (what to avoid/repeat)</li>
+      <li><strong>Project</strong> — Non-derivable context (deadlines, decisions, stakeholder info)</li>
+      <li><strong>Reference</strong> — External links (dashboards, channels, docs)</li>
+    </ul>
+  </div></div></div>
+</section></div>
+<div class="divider"></div>
+
+<!-- ==================== TRANSPORT ==================== -->
+<div class="container"><section id="transport">
+  <div class="section-label">Network Layer</div>
+  <div class="section-title">Transport Protocols & Resilience</div>
+  <div class="section-desc">Three transport implementations with reconnection, echo dedup, sleep detection, and serialized batch uploading.</div>
+
+  <div class="grid-2">
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-blue">🔌</div>
+    <div class="card-info"><div class="card-name">WebSocket Transport</div><div class="card-brief">Full duplex with ping/pong, sleep detection, last-sent-id dedup</div>
+    <div class="card-meta"><span>Ping: 10s</span><span>Keep-alive: 5min</span><span>Give-up: 10min</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <ul>
+      <li><strong>Dual runtime:</strong> Bun (native WebSocket) and Node.js (ws package) with runtime detection</li>
+      <li><strong>Liveness:</strong> Ping every 10s, if no pong on next ping → force reconnect</li>
+      <li><strong>Reconnect:</strong> Exponential backoff 1s → 30s, ±25% jitter, 10min budget</li>
+      <li><strong>Sleep detection:</strong> If gap > 60s between attempts → reset error budget</li>
+      <li><strong>Dedup:</strong> Last-sent-id tracking, <code>X-Last-Request-Id</code> header on reconnect</li>
+      <li><strong>Permanent close codes:</strong> 1002, 4001 never retry. 4003 retries with refreshed headers</li>
+      <li><strong>Memory leak prevention:</strong> All listeners cleaned up before each reconnect</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-green">📡</div>
+    <div class="card-info"><div class="card-name">SSE Transport</div><div class="card-brief">Server-Sent Events with sequence tracking and liveness timeout</div>
+    <div class="card-meta"><span>Liveness: 45s</span><span>Write retries: 10</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <ul>
+      <li><strong>Sequence tracking:</strong> Event ID = sequence number, high-water mark for resumption</li>
+      <li><strong>Dedup set:</strong> Tracks seen sequences with pruning (keep 200 around high-water)</li>
+      <li><strong>Last-Event-ID header:</strong> Sent on reconnect for server-side resumption</li>
+      <li><strong>Liveness:</strong> Any frame (including SSE comments) resets 45s timer</li>
+      <li><strong>Write path:</strong> HTTP POST with 10 retries, exponential backoff 500ms → 8s</li>
+      <li><strong>Permanent 4xx (non-429):</strong> No retry, drop message</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-orange">🔀</div>
+    <div class="card-info"><div class="card-name">Hybrid Transport</div><div class="card-brief">WebSocket reads + HTTP POST writes with SerialBatchEventUploader</div>
+    <div class="card-meta"><span>Batch: 100ms flush</span><span>Max queue: 100K</span><span>Grace: 3s close</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Write Flow</h4>
+    <div class="cb"><span class="fn">write</span>(stream_event)
+  → buffer (<span class="num">100ms</span> BATCH_FLUSH_INTERVAL)
+  → enqueue
+  → <span class="type">SerialBatchEventUploader</span>
+  → POST /session/{id}/events
+
+<span class="fn">write</span>(other)
+  → <span class="kw">flush</span> buffered stream_events first <span class="cmt">// ordering guarantee</span>
+  → enqueue
+  → <span class="fn">postOnce</span>() [serial retry loop]</div>
+
+    <h4>SerialBatchEventUploader</h4>
+    <ul>
+      <li><strong>At most one POST in-flight</strong> at any time (serialized)</li>
+      <li><strong>Quadratic backoff:</strong> 500ms base, 8s max, 1s jitter</li>
+      <li><strong>Max batch size:</strong> 500 events per POST</li>
+      <li><strong>Max queue:</strong> 100,000 events (memory bound)</li>
+      <li><strong>On-batch-dropped callback</strong> for telemetry</li>
+      <li><strong>Graceful shutdown:</strong> 3s grace period for queued writes on close()</li>
+    </ul>
+  </div></div></div>
+  </div>
+</section></div>
+<div class="divider"></div>
+
+<!-- ==================== INFRASTRUCTURE ==================== -->
+<div class="container"><section id="infra">
+  <div class="section-label">Infrastructure</div>
+  <div class="section-title">Analytics, Feature Flags, Migrations & Voice</div>
+  <div class="section-desc">The supporting infrastructure — GrowthBook feature flags, 1P event logging with disk retry, config migrations, and voice input.</div>
+
+  <div class="grid-2">
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-yellow">🏴</div>
+    <div class="card-info"><div class="card-name">GrowthBook Feature Flags</div><div class="card-brief">Remote eval with disk cache fallback, env overrides, exposure dedup</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Override Priority</h4>
+    <div class="cb"><span class="cmt">// Highest → Lowest</span>
+<span class="num">1.</span> Env var: CLAUDE_INTERNAL_FC_OVERRIDES (JSON, memoized once)
+<span class="num">2.</span> Config file: /config Gates tab (checked per-call)
+<span class="num">3.</span> Remote eval: server pre-evaluated values
+<span class="num">4.</span> Disk cache: ~/.claude.json cachedGrowthBookFeatures
+<span class="num">5.</span> Default value from code</div>
+    <ul>
+      <li><strong>Exposure dedup:</strong> <code>loggedExposures</code> Set prevents duplicate events per session</li>
+      <li><strong>Refresh listeners:</strong> <code>onGrowthBookRefresh</code> fires on init and periodic refresh</li>
+      <li><strong>5s timeout:</strong> Remote eval has 5s timeout, falls back to stale disk cache</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-red">📊</div>
+    <div class="card-info"><div class="card-name">1P Event Logging Pipeline</div><div class="card-brief">OTel BatchLogRecordProcessor → HTTP POST with disk retry on failure</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="cb"><span class="cmt">// Event batching pipeline</span>
+<span class="fn">logEvent</span>(<span class="str">'tengu_started'</span>, {})
+  → OTel BatchLogRecordProcessor
+  → export() triggers on:
+    - Time interval (5s)
+    - Batch size (200 events)
+  → HTTP POST to analytics endpoint
+  → On failure: append to disk
+    ~/.claude/telemetry/1p_failed_events.<span class="str">{sessionId}</span>.<span class="str">{batchUuid}</span>.json
+  → On next startup: retry failed files (one attempt, then delete)</div>
+    <ul>
+      <li><strong>Quadratic backoff:</strong> 500ms base, 30s max, 8 attempts per batch</li>
+      <li><strong>401 handling:</strong> Retry without auth on second attempt</li>
+      <li><strong>Poison pill prevention:</strong> One retry per file per process</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-cyan">🔄</div>
+    <div class="card-info"><div class="card-name">Config Migration System</div><div class="card-brief">Idempotent sync migrations run in preAction hook. Currently at version 11</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="cb"><span class="kw">const</span> CURRENT_MIGRATION_VERSION = <span class="num">11</span>
+
+<span class="fn">runMigrations</span>(): <span class="kw">void</span> {
+  <span class="kw">if</span> (config.migrationVersion !== CURRENT_MIGRATION_VERSION) {
+    <span class="fn">migrateAutoUpdatesToSettings</span>()
+    <span class="fn">migrateBypassPermissionsAcceptedToSettings</span>()
+    <span class="fn">migrateSonnet45ToSonnet46</span>()
+    <span class="fn">migrateOpusToOpus1m</span>()
+    <span class="cmt">// ... 11 total migrations</span>
+    saveGlobalConfig(prev => ({...prev, migrationVersion: <span class="num">11</span>}))
+  }
+}</div>
+    <ul>
+      <li><strong>Idempotent:</strong> Only writes if condition not met</li>
+      <li><strong>Sync:</strong> Runs before first command handler</li>
+      <li><strong>Per-source:</strong> Uses <code>getSettingsForSource()</code> + <code>updateSettingsForSource()</code></li>
+      <li><strong>Versioned:</strong> Bump <code>CURRENT_MIGRATION_VERSION</code> when adding migrations</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-pink">🎤</div>
+    <div class="card-info"><div class="card-name">Voice Input System</div><div class="card-brief">Native audio capture with platform-specific fallbacks</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="tw"><table>
+      <tr><th>Platform</th><th>Primary</th><th>Fallback</th></tr>
+      <tr><td>macOS</td><td>CoreAudio/AudioUnit (native)</td><td>SoX (<code>brew install sox</code>)</td></tr>
+      <tr><td>Linux</td><td>ALSA (if cards present)</td><td>arecord, then SoX (apt-get/dnf/pacman)</td></tr>
+      <tr><td>Windows</td><td>audio-capture-napi</td><td>—</td></tr>
+    </table></div>
+    <ul>
+      <li><strong>Lazy loading:</strong> Native module loaded on first voice keypress (~1s warm, ~8s cold)</li>
+      <li><strong>Sampling:</strong> 16kHz, mono, 2s silence detection at 3% threshold</li>
+      <li><strong>Probe test:</strong> <code>arecord</code> availability via 150ms spawn race</li>
+    </ul>
+  </div></div></div>
+  </div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-green">👥</div>
+    <div class="card-info"><div class="card-name">Coordinator Mode — Multi-Agent Orchestration</div><div class="card-brief">Feature-gated mode where one agent coordinates multiple workers</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <p>When <code>CLAUDE_CODE_COORDINATOR_MODE</code> is set, Claude operates as a <strong>coordinator</strong> that spawns and manages worker agents via Agent/SendMessage/TaskStop tools.</p>
+    <h4>Worker Tool Access</h4>
+    <p>Workers get <code>ASYNC_AGENT_ALLOWED_TOOLS</code> minus internal-only tools (TeamCreate, TeamDelete, SendMessage, SyntheticOutput). The coordinator's system prompt defines a 3-phase workflow: <strong>researcher → implementer → verifier</strong>.</p>
+    <h4>Mode Detection</h4>
+    <div class="cb"><span class="cmt">// Live read — no caching, env var can change mid-session</span>
+<span class="fn">isCoordinatorMode</span>() → checks process.env.CLAUDE_CODE_COORDINATOR_MODE
+<span class="fn">matchSessionMode</span>(sessionMode) → flips env var if mismatch, logs switch event</div>
+  </div></div></div>
+</section></div>
+
+<div class="divider"></div>
+
+<!-- ==================== SYSTEM PROMPT ==================== -->
+<div class="container"><section id="prompt">
+  <div class="section-label">The Prompt</div>
+  <div class="section-title">What the Model Actually Sees</div>
+  <div class="section-desc">The system prompt is the soul of Claude Code. Understanding its structure explains why the tool behaves the way it does.</div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-purple">📜</div>
+    <div class="card-info"><div class="card-name">System Prompt Structure — Static + Dynamic Sections</div><div class="card-brief">~8-12KB static, 2-5KB dynamic, split by a cache boundary marker</div>
+    <div class="card-meta"><span>systemPrompt.ts + prompts.ts</span><span>Cache boundary for cost optimization</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Full Prompt Assembly (Priority Order)</h4>
+    <div class="cb"><span class="cmt">// buildEffectiveSystemPrompt() resolves in this order:</span>
+<span class="num">0.</span> Override system prompt (--override-system-prompt)  <span class="cmt">→ REPLACES everything</span>
+<span class="num">1.</span> Coordinator prompt (if COORDINATOR_MODE active)
+<span class="num">2.</span> Agent prompt (if mainThreadAgentDefinition set)
+<span class="num">3.</span> Custom prompt (--system-prompt flag)
+<span class="num">4.</span> Default prompt (standard Claude Code prompt)
+<span class="kw">PLUS:</span> appendSystemPrompt always added at end (unless override set)</div>
+
+    <h4>Static Sections (Cached Globally)</h4>
+    <ul>
+      <li><strong>Intro</strong> — "You are Claude Code, Anthropic's official CLI..."</li>
+      <li><strong>System</strong> — How tools work, permission modes, hooks, compression</li>
+      <li><strong>Doing Tasks</strong> — When to ask, code style guidelines, security awareness</li>
+      <li><strong>Executing Actions</strong> — Reversibility considerations, when to confirm with user</li>
+      <li><strong>Using Your Tools</strong> — Prefer dedicated tools over Bash, task tool guidance</li>
+      <li><strong>Tone and Style</strong> — No emojis, include line numbers, no colon before tool calls</li>
+      <li><strong>Output Efficiency</strong> — Be concise, lead with the answer</li>
+    </ul>
+
+    <h4>Dynamic Sections (Per-Session, Not Cached)</h4>
+    <ul>
+      <li><strong>Session Guidance</strong> — AskUserQuestion, fork agents, skills, verification</li>
+      <li><strong>Memory</strong> — CLAUDE.md file contents</li>
+      <li><strong>Environment</strong> — CWD, git status, model name, platform, shell, OS version</li>
+      <li><strong>Language Preference</strong> — User's language setting</li>
+      <li><strong>MCP Instructions</strong> — From connected MCP servers</li>
+      <li><strong>Token Budget</strong> — When user specifies token targets</li>
+    </ul>
+
+    <h4>Cache Boundary Marker</h4>
+    <div class="cb"><span class="kw">SYSTEM_PROMPT_DYNAMIC_BOUNDARY</span> = <span class="str">'__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'</span>
+<span class="cmt">// Everything BEFORE this → can be cached globally (shared across orgs)</span>
+<span class="cmt">// Everything AFTER this  → per-session, never cached globally</span>
+<span class="cmt">// This single marker saves significant API costs via prompt caching</span></div>
+
+    <h4>What the Model Receives Per Turn</h4>
+    <div class="cb"><span class="cmt">// API Request Structure</span>
+{
+  <span class="kw">system</span>: [                          <span class="cmt">// System prompt blocks</span>
+    { text: <span class="str">"Attribution header"</span>, cache: <span class="num">null</span> },
+    { text: <span class="str">"Static sections..."</span>, cache: <span class="str">'global'</span> },
+    { text: <span class="str">"Dynamic sections..."</span>, cache: <span class="num">null</span> },
+  ],
+  <span class="kw">messages</span>: [                        <span class="cmt">// Conversation</span>
+    { role: <span class="str">'user'</span>, content: <span class="str">"&lt;system-reminder&gt;git status + CLAUDE.md&lt;/system-reminder&gt;"</span> },
+    { role: <span class="str">'user'</span>, content: <span class="str">"Fix the auth bug"</span> },
+    { role: <span class="str">'assistant'</span>, content: [tool_use, text] },
+    { role: <span class="str">'user'</span>, content: [tool_result, <span class="str">"&lt;system-reminder&gt;skills...&lt;/system-reminder&gt;"</span>] },
+    <span class="cmt">// ... more turns</span>
+  ],
+  <span class="kw">tools</span>: [ ... ]                     <span class="cmt">// 45+ tool JSON schemas (sorted alphabetically for cache stability)</span>
+}</div>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-green">📄</div>
+    <div class="card-info"><div class="card-name">CLAUDE.md Discovery — Bottom-Up Directory Traversal</div><div class="card-brief">Walks from CWD to repo root, loading memory files in priority order</div>
+    <div class="card-meta"><span>claudemd.ts — 800+ lines</span><span>@include directive support</span></div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Discovery Order (Later = Higher Priority)</h4>
+    <div class="pipeline">
+      <div class="ps"><div class="pn"><div class="c">1</div><div class="l"></div></div><div class="pi"><h5>Managed memory</h5><p><code>/etc/claude-code/CLAUDE.md</code> — Global instructions for all users (admin-controlled)</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">2</div><div class="l"></div></div><div class="pi"><h5>User memory</h5><p><code>~/.claude/CLAUDE.md</code> — Private global instructions</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">3</div><div class="l"></div></div><div class="pi"><h5>Project memory (bottom-up walk)</h5><p>From CWD upward to repo root: <code>CLAUDE.md</code>, <code>.claude/CLAUDE.md</code>, all <code>.md</code> files in <code>.claude/rules/</code></p></div></div>
+      <div class="ps"><div class="pn"><div class="c">4</div></div><div class="pi"><h5>Local memory</h5><p><code>CLAUDE.local.md</code> — Private project-specific (gitignored, highest priority)</p></div></div>
+    </div>
+
+    <h4>@include Directive</h4>
+    <div class="cb"><span class="cmt">// Include other files inline</span>
+@path/to/file.md        <span class="cmt">// Relative to CLAUDE.md location</span>
+@./relative/path.md     <span class="cmt">// Explicit relative</span>
+@~/home/path.md         <span class="cmt">// Home directory</span>
+@/absolute/path.md      <span class="cmt">// Absolute path</span>
+
+<span class="cmt">// Circular references prevented via processedFiles Set</span>
+<span class="cmt">// Non-existent files silently ignored</span>
+<span class="cmt">// Only works in text nodes (not inside code blocks)</span></div>
+
+    <h4>Content Processing</h4>
+    <ul>
+      <li>HTML comments (<code>&lt;!-- --&gt;</code>) stripped at block level only</li>
+      <li>YAML frontmatter with <code>paths:</code> field for conditional application</li>
+      <li>Max recommended size: <strong>40KB per file</strong></li>
+      <li>Auto-memory files truncated via <code>truncateEntrypointContent()</code></li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-cyan">💉</div>
+    <div class="card-info"><div class="card-name">&lt;system-reminder&gt; Injection Mechanism</div><div class="card-brief">How context is injected into tool results and user messages without disrupting the conversation</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <p><code>&lt;system-reminder&gt;</code> XML tags are the injection mechanism for runtime context. They appear inside tool results and user messages but are actually system-level information.</p>
+    <h4>What Gets Injected via system-reminder</h4>
+    <ul>
+      <li><strong>Git status + CLAUDE.md</strong> — First user message (isMeta=true)</li>
+      <li><strong>Available skills</strong> — "Skills relevant to your task: ..." in tool results</li>
+      <li><strong>Agent definitions</strong> — Available agent types for AgentTool</li>
+      <li><strong>Plan mode reminders</strong> — Planning constraints and instructions</li>
+      <li><strong>LSP diagnostics</strong> — Language server warnings/errors</li>
+      <li><strong>Async hook responses</strong> — Background hook results</li>
+      <li><strong>Memory attachments</strong> — Nested memory file contents</li>
+      <li><strong>Deferred tool schemas</strong> — Lazy-loaded tool definitions from ToolSearch</li>
+    </ul>
+    <p>The system prompt tells the model: <em>"Tool results and user messages may include &lt;system-reminder&gt; tags. They contain useful information from the system and bear no direct relation to the specific tool results in which they appear."</em></p>
+  </div></div></div>
+</section></div>
+<div class="divider"></div>
+
+<!-- ==================== AGENTS ==================== -->
+<div class="container"><section id="agents">
+  <div class="section-label">Multi-Agent System</div>
+  <div class="section-title">Agent Spawning, IPC & Isolation</div>
+  <div class="section-desc">Agents run in the same Node.js process (not separate processes). Communication is via task notification messages and disk output files.</div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-orange">🤝</div>
+    <div class="card-info"><div class="card-name">Process Model — No Separate Processes</div><div class="card-brief">Agents run in the parent's event loop via async closures. Worktrees provide filesystem isolation</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Three Execution Modes</h4>
+    <div class="tw"><table>
+      <tr><th>Mode</th><th>Process Model</th><th>Blocks Parent?</th><th>Trigger</th></tr>
+      <tr><td><strong>Sync</strong></td><td>In-process, main event loop</td><td>Yes (until auto-background at 2s)</td><td>Default when <code>run_in_background: false</code></td></tr>
+      <tr><td><strong>Async</strong></td><td>In-process, microtask queue</td><td>No — fire-and-forget closure</td><td><code>run_in_background: true</code>, coordinator mode, Kairos</td></tr>
+      <tr><td><strong>Remote</strong></td><td>Separate CCR environment</td><td>No — teleport protocol</td><td><code>isolation: 'remote'</code> (ant-only)</td></tr>
+    </table></div>
+
+    <div class="callout info"><span class="ci">i</span><span><strong>Key insight:</strong> Agents are NOT separate processes. They run as async generators in the same Node.js event loop. This means they share memory, CPU, and can't truly parallelize compute — but it enables zero-overhead context sharing and prompt cache reuse.</span></div>
+
+    <h4>Context Inheritance</h4>
+    <div class="cb"><span class="cmt">// What child inherits from parent:</span>
+✅ Tool pool (options.tools)
+✅ MCP clients (options.mcpClients)
+✅ File state cache (<span class="kw">deep clone</span> for isolation)
+✅ Permission mode (or overridden by agent definition)
+✅ System prompt bytes (<span class="kw">identical copy</span> for cache hits)
+
+<span class="cmt">// What's isolated:</span>
+❌ readFileState → deep clone
+❌ abortController → new child (parent abort propagates DOWN, not UP)
+❌ setAppState → <span class="kw">no-op</span> (breaks mutation isolation)
+❌ messages → cloned or overridden
+❌ nestedMemoryAttachmentTriggers → fresh empty Set</div>
+
+    <h4>Fork Subagent — Cache-Identical Spawning</h4>
+    <p>When <code>subagent_type</code> is omitted, the child inherits the <strong>parent's exact system prompt bytes</strong> and <strong>full conversation context</strong>. This means the API request prefix is byte-identical to the parent's, enabling prompt cache hits. A <code>&lt;fork-boilerplate-tag&gt;</code> is appended to prevent recursive forking.</p>
+
+    <h4>Communication (No IPC — Message Queue)</h4>
+    <ul>
+      <li><strong>Parent → Child:</strong> Initial prompt + context at spawn time. No mid-execution messages</li>
+      <li><strong>Child → Parent:</strong> Task notification XML enqueued to parent's message queue on completion</li>
+      <li><strong>Agent → Agent (teams):</strong> Mailbox files at <code>~/.claude/teams/{team}/mail/{recipient}.jsonl</code></li>
+      <li><strong>Output storage:</strong> JSONL transcript at <code>~/.claude/agents/{sessionId}/{agentId}.jsonl</code></li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-blue">🌿</div>
+    <div class="card-info"><div class="card-name">Worktree Isolation & Custom Agent Definitions</div><div class="card-brief">Git worktrees for filesystem isolation; agents defined in markdown with JSON frontmatter</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Worktree Lifecycle</h4>
+    <ul>
+      <li><strong>Creation:</strong> <code>git worktree add</code> or hook-based fallback if git unavailable</li>
+      <li><strong>CWD override:</strong> Agent runs in worktree via <code>runWithCwdOverride()</code></li>
+      <li><strong>Cleanup:</strong> Changed worktrees <strong>kept</strong> (user reviews), unchanged worktrees <strong>deleted</strong></li>
+    </ul>
+
+    <h4>Agent Definition Sources (6 total)</h4>
+    <div class="cb"><span class="num">1.</span> Built-in agents    <span class="cmt">→ ./built-in/ directory (general-purpose, explore, plan, etc.)</span>
+<span class="num">2.</span> Plugin agents      <span class="cmt">→ From installed plugins' agents/ directories</span>
+<span class="num">3.</span> User agents        <span class="cmt">→ ~/.claude/agents/ (personal custom agents)</span>
+<span class="num">4.</span> Project agents     <span class="cmt">→ ./agents/ in project root</span>
+<span class="num">5.</span> Managed agents     <span class="cmt">→ Admin-controlled policy settings</span>
+<span class="num">6.</span> Flag agents        <span class="cmt">→ Feature-flagged A/B test agents</span></div>
+
+    <h4>Agent Frontmatter Format</h4>
+    <div class="cb"><span class="cmt">---json</span>
+{
+  <span class="str">"description"</span>: <span class="str">"Security review agent"</span>,
+  <span class="str">"tools"</span>: [<span class="str">"Bash"</span>, <span class="str">"Read"</span>, <span class="str">"Grep"</span>],
+  <span class="str">"model"</span>: <span class="str">"opus"</span>,
+  <span class="str">"permissionMode"</span>: <span class="str">"plan"</span>,
+  <span class="str">"background"</span>: <span class="num">true</span>,
+  <span class="str">"isolation"</span>: <span class="str">"worktree"</span>,
+  <span class="str">"maxTurns"</span>: <span class="num">50</span>,
+  <span class="str">"hooks"</span>: { ... }
+}
+<span class="cmt">---</span>
+
+# Agent Prompt
+You are a security review specialist...</div>
+  </div></div></div>
+</section></div>
+<div class="divider"></div>
+
+<!-- ==================== SESSION & HISTORY ==================== -->
+<div class="container"><section id="session">
+  <div class="section-label">Session Management</div>
+  <div class="section-title">Resume, History, Context Windows & Classifier</div>
+  <div class="section-desc">The remaining pieces: how sessions resume, how history works, how context windows are managed, and how the auto-mode classifier decides permissions.</div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-cyan">🔄</div>
+    <div class="card-info"><div class="card-name">Session Resume — Reconstructing Conversations from Disk</div><div class="card-brief">Loads JSONL transcripts, filters incomplete messages, rebuilds state</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Resume Flow</h4>
+    <div class="pipeline">
+      <div class="ps"><div class="pn"><div class="c">1</div><div class="l"></div></div><div class="pi"><h5>Discovery</h5><p><code>loadAllProjectsMessageLogs()</code> scans <code>~/.claude/projects/</code>. Returns lite (summary) logs for fast UI</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">2</div><div class="l"></div></div><div class="pi"><h5>Selection</h5><p>Interactive picker UI filtered by <code>filterResumableSessions()</code> — excludes current session and sidechains</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">3</div><div class="l"></div></div><div class="pi"><h5>Full Load</h5><p><code>loadFullLog()</code> deserializes complete JSONL transcript into message array</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">4</div><div class="l"></div></div><div class="pi"><h5>Cleanup</h5><p>Filters: orphaned thinking blocks, unresolved tool_uses, whitespace-only messages</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">5</div></div><div class="pi"><h5>Reconstruction</h5><p>Restore cost state via <code>restoreCostStateForSession()</code>, rebuild worktree tracking, re-persist metadata</p></div></div>
+    </div>
+    <p><strong>Cross-project detection:</strong> If the conversation is from a different directory, generates a command string for the user to copy-paste (can't resume across projects directly).</p>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-yellow">📏</div>
+    <div class="card-info"><div class="card-name">Context Window Management per Model</div><div class="card-brief">7-level resolution chain from environment overrides to built-in defaults</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <div class="cb"><span class="cmt">// getContextWindowForModel() resolution chain:</span>
+
+<span class="num">1.</span> <span class="kw">CLAUDE_CODE_MAX_CONTEXT_TOKENS</span> env var    <span class="cmt">→ Highest priority override</span>
+<span class="num">2.</span> Explicit <span class="str">[1m]</span> suffix in model name          <span class="cmt">→ Client opt-in for 1M context</span>
+<span class="num">3.</span> Model capability lookup                    <span class="cmt">→ API spec max_input_tokens</span>
+<span class="num">4.</span> Beta header detection                      <span class="cmt">→ CONTEXT_1M_BETA_HEADER</span>
+<span class="num">5.</span> Sonnet 1M experiment treatment              <span class="cmt">→ GrowthBook A/B test</span>
+<span class="num">6.</span> Ant model config                           <span class="cmt">→ antModel.contextWindow (internal)</span>
+<span class="num">7.</span> Default: <span class="num">200,000</span> tokens                    <span class="cmt">→ Built-in fallback</span>
+
+<span class="cmt">// Max output tokens per model:</span>
+Opus 4.6:   default <span class="num">64K</span>,  upper limit <span class="num">128K</span>
+Sonnet 4.6: default <span class="num">32K</span>,  upper limit <span class="num">128K</span>
+Haiku 4.5:  model-specific defaults</div>
+
+    <h4>Model Selection Priority</h4>
+    <ul>
+      <li><code>/model</code> command during session → highest</li>
+      <li><code>--model</code> CLI flag at startup</li>
+      <li><code>ANTHROPIC_MODEL</code> env var</li>
+      <li>User's saved settings</li>
+      <li>Built-in default (Opus for Max subscribers, Sonnet for others)</li>
+    </ul>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-red">🤖</div>
+    <div class="card-info"><div class="card-name">Auto-Mode Classifier (YOLO) — ML-Based Permission Decisions</div><div class="card-brief">Calls Claude to classify whether a tool use is safe to auto-approve</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <p>When permission mode is <code>auto</code>, every tool call that would normally prompt the user is instead sent to an ML classifier that decides allow/deny/ask.</p>
+
+    <h4>Classification Flow</h4>
+    <div class="pipeline">
+      <div class="ps"><div class="pn"><div class="c">1</div><div class="l"></div></div><div class="pi"><h5>Load classifier prompt</h5><p>Pre-built prompts from <code>/yolo-classifier-prompts/</code> — system prompt + permission template (external vs internal)</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">2</div><div class="l"></div></div><div class="pi"><h5>Merge user rules</h5><p>User's <code>settings.autoMode</code> allow/deny rules injected into classifier prompt</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">3</div><div class="l"></div></div><div class="pi"><h5>API call via sideQuery()</h5><p>Sends tool name + input to classifier model, parses structured response</p></div></div>
+      <div class="ps"><div class="pn"><div class="c">4</div></div><div class="pi"><h5>Decision extraction</h5><p>Parses tool_use block from response: <code>shouldBlock</code>, <code>reason</code>, <code>confidence</code> (high/medium/low)</p></div></div>
+    </div>
+
+    <h4>Two-Stage Classification</h4>
+    <ul>
+      <li><strong>Fast stage:</strong> Quick pattern matching, low-confidence fallback</li>
+      <li><strong>Thinking stage:</strong> Full reasoning if fast stage uncertain</li>
+    </ul>
+
+    <h4>Integration with Permission System</h4>
+    <p>The classifier runs <strong>in parallel</strong> with the permission UI dialog (3s timeout). If it finishes with high confidence before the user clicks, the dialog is auto-resolved. This is the <code>peekSpeculativeClassifierCheck()</code> mechanism covered in the deep dive.</p>
+
+    <div class="callout warn"><span class="ci">!</span><span><strong>Trust gap:</strong> The classifier is an external ML model making security decisions. There's no human review loop — a confident-but-wrong classification auto-approves the action. This is the main security concern with <code>auto</code> mode.</span></div>
+  </div></div></div>
+
+  <div class="card" onclick="toggle(this)"><div class="card-header">
+    <div class="card-icon ci-green">📝</div>
+    <div class="card-info"><div class="card-name">Prompt History & File History — Undo Support</div><div class="card-brief">JSONL append-only history with async flushing, undo via skip-set</div></div>
+    <svg class="card-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  </div><div class="card-body"><div class="card-content">
+    <h4>Prompt History</h4>
+    <div class="cb"><span class="cmt">// Storage: ~/.claude/history.jsonl (shared across projects)</span>
+{
+  <span class="str">"display"</span>: <span class="str">"Fix the auth bug in login.ts"</span>,
+  <span class="str">"timestamp"</span>: <span class="num">1711900800000</span>,
+  <span class="str">"project"</span>: <span class="str">"/Users/me/myproject"</span>,
+  <span class="str">"sessionId"</span>: <span class="str">"abc123"</span>,
+  <span class="str">"pastedContents"</span>: { <span class="cmt">/* inline if &lt;1024 chars, hash reference if larger */</span> }
+}
+<span class="cmt">// Max 100 entries per project, deduped by display text</span></div>
+
+    <h4>Undo Mechanism</h4>
+    <ul>
+      <li><strong>Fast path:</strong> Entry still in pending buffer → remove from array</li>
+      <li><strong>Slow path:</strong> Entry already flushed to disk → add timestamp to <code>skippedTimestamps</code> Set</li>
+      <li><code>getHistory()</code> filters skip-set entries during read</li>
+    </ul>
+
+    <h4>File History (Edit Undo)</h4>
+    <p>FileEditTool calls <code>fileHistoryTrackEdit()</code> before each write. Creates content-hash-keyed backups. Idempotent — same content won't create duplicate backups. Enables restoring files to pre-edit state.</p>
+  </div></div></div>
+</section></div>
+<div class="divider"></div>
+
+<footer style="text-align:center;padding:4rem 2rem;color:var(--text3);font-size:0.85rem">
+  <div style="font-family:var(--font-mono);font-weight:700;color:var(--orange2);font-size:1rem;margin-bottom:1rem">claude code — internals guide</div>
+  <p>The deepest layer. Startup tricks, rendering pipelines, type hierarchies, extensibility stack, transport protocols.</p>
+  <p style="margin-top:0.5rem;font-size:0.75rem">Generated with Claude Code</p>
+</footer>
+
+<script>
+window.addEventListener('scroll',()=>{document.getElementById('scrollProgress').style.width=(document.documentElement.scrollTop/(document.documentElement.scrollHeight-window.innerHeight))*100+'%'});
+let ls=0;window.addEventListener('scroll',()=>{const c=window.scrollY;document.getElementById('nav').classList.toggle('hidden',c>ls&&c>200);ls=c});
+const nl=document.querySelectorAll('.nav-links a[href^="#"]'),ss=document.querySelectorAll('section[id]');
+window.addEventListener('scroll',()=>{const p=window.scrollY+200;ss.forEach(s=>{const l=document.querySelector(`.nav-links a[href="#${s.id}"]`);if(l)l.classList.toggle('active',p>=s.offsetTop&&p<s.offsetTop+s.offsetHeight)})});
+function toggle(c){c.classList.toggle('open')}
+document.querySelectorAll('a[href^="#"]').forEach(a=>{a.addEventListener('click',e=>{e.preventDefault();document.querySelector(a.getAttribute('href'))?.scrollIntoView({behavior:'smooth'})})});
+</script>
+</body>
+</html>
